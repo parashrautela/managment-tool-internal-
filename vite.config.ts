@@ -50,6 +50,7 @@ export default defineConfig(async ({ command }) => {
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
   const { cloudflare } = await import("@cloudflare/vite-plugin");
+  const { VitePWA } = await import("vite-plugin-pwa");
 
   return {
     server: {
@@ -64,6 +65,15 @@ export default defineConfig(async ({ command }) => {
       vinext(),
       sites({ mockAuth: !managedLinux }),
       connectorPreview(),
+      VitePWA({
+        registerType: "autoUpdate",
+        manifest: false,
+        workbox: {
+          globPatterns: ["**/*.{js,css,html,ico,png,svg,json,woff2}"],
+          navigateFallback: "/offline.html",
+          navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
+        },
+      }),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
