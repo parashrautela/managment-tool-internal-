@@ -1,4 +1,4 @@
-import { getChatGPTUser } from '../../chatgpt-auth';
+import { getUser } from '../../../lib/auth';
 import { getDb } from '../../../db';
 import { projects, members, issues } from '../../../db/schema';
 import { and, eq, isNull, inArray, sql } from 'drizzle-orm';
@@ -9,7 +9,7 @@ function required(v: unknown, max: number) { if(typeof v !== 'string' || !v.trim
 function choice(v: unknown, values: readonly string[]) { if(typeof v !== 'string'||!values.includes(v)) throw new RequestError('Invalid selection.'); return v; }
 function optional(v: unknown, max: number) { if(v == null || v === '') return ''; return required(v,max); }
 async function handle(req: Request) {
- const user = await getChatGPTUser();
+ const user = await getUser();
  if(!user) return Response.json({error:'Please sign in to access your workspace.'},{status:401});
  if(req.method !== 'GET' && req.headers.get('origin') !== new URL(req.url).origin) return Response.json({error:'Invalid request origin.'},{status:403});
  const db = getDb(), email = user.email.toLowerCase();
@@ -27,7 +27,10 @@ async function handle(req: Request) {
   if(!/^[A-Z][A-Z0-9]{1,7}$/.test(key)) throw new RequestError('Use 2–8 letters or numbers for the project key, starting with a letter.');
   const color=choice(b.color,['purple','blue','green','orange']);
   const id=crypto.randomUUID();
-  await db.batch([db.insert(projects).values({id,name,key,description:optional(b.description,1000),color,ownerId:user.userId,createdAt:new Date().toISOString()}),db.insert(members).values({id:crypto.randomUUID(),projectId:id,userId:user.userId,email,name:user.displayName,role:'owner'})]);
+  await db.transaction(async tx => {
+   await tx.insert(projects).values({id,name,key,description:optional(b.description,1000),color,ownerId:user.userId,createdAt:new Date().toISOString()});
+   await tx.insert(members).values({id:crypto.randomUUID(),projectId:id,userId:user.userId,email,name:user.displayName,role:'owner'});
+  });
   return Response.json({id});
  }
  const projectId=required(b.projectId,80);
@@ -51,11 +54,16 @@ async function handle(req: Request) {
   if(!canEdit(role)) throw new RequestError('Viewers have read-only access.',403);
   const values={title:required(b.title,160),description:optional(b.description,5000),status:choice(b.status,statuses),priority:choice(b.priority,priorities),label:choice(b.label,['Feature','Design','Bug','Research','Task']),assignee:b.assignee?required(b.assignee,80):null};
   if(values.assignee){const [a]=await db.select().from(members).where(and(eq(members.projectId,projectId),eq(members.id,values.assignee)));if(!a)throw new RequestError('Assignee must belong to this project.');}
-  if(b.action==='createIssue') {await db.insert(issues).values({...values,id:crypto.randomUUID(),projectId,number:sql`(SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE project_id = ${projectId})`,createdAt:new Date().toISOString()});}
+  if(b.action==='createIssue') {
+   await db.transaction(async tx => {
+    const [counter] = await tx.update(projects).set({issueCounter:sql`${projects.issueCounter} + 1`}).where(eq(projects.id,projectId)).returning({number:projects.issueCounter});
+    await tx.insert(issues).values({...values,id:crypto.randomUUID(),projectId,number:counter.number,createdAt:new Date().toISOString()});
+   });
+  }
   else {const [issue]=await db.select().from(issues).where(and(eq(issues.projectId,projectId),eq(issues.id,required(b.issueId,80))));if(!issue)throw new RequestError('Issue not found.',404);await db.update(issues).set(values).where(eq(issues.id,issue.id));}
  } else throw new RequestError('Unknown action.');
  return Response.json({ok:true});
 }
-async function route(req: Request) { try{return await handle(req);}catch(e){if(e instanceof RequestError)return Response.json({error:e.message},{status:e.status});console.error(e);return Response.json({error:'Something went wrong. Please try again.'},{status:500});} }
+async function route(req: Request) { try{return await handle(req);}catch(e){if(e instanceof RequestError)return Response.json({error:e.message},{status:e.status});if(e instanceof Error && e.message.includes('not configured'))return Response.json({error:e.message},{status:503});console.error(e);return Response.json({error:'Something went wrong. Please try again.'},{status:500});} }
 export const GET=route;
 export const POST=route;

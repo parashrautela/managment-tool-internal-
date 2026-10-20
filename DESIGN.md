@@ -15,7 +15,7 @@ A calm workspace for projects, issues, and people. Inspired by Jira’s project 
 2. Open a project: Board, List, People, Settings.
 3. Create issues: title, description, status, priority, label, assignee.
 4. Move work: drag issue cards or edit the status in the issue dialog.
-5. Grant project membership by email, then share the workspace URL. No email is sent by the app. Hosting access is a separate requirement.
+5. Grant project membership by email, then share the workspace URL. No email is sent by the app. Teammates must register with the same email and confirm it through Supabase Auth.
 
 ## Access
 - Owner: all project operations; appoint admins; manage everyone except the immutable owner membership.

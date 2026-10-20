@@ -1,0 +1,7 @@
+project_id = "flowboard"
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+enabled = false

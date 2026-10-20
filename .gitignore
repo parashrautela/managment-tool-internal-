@@ -57,3 +57,7 @@ next-env.d.ts
 
 # Local verification artifacts
 *.tsbuildinfo
+
+!.env.example
+/supabase/.temp/
+/supabase/.branches/

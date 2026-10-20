@@ -1,13 +1,16 @@
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "./schema";
+import 'server-only';
+import postgres from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import * as schema from './schema';
+
+let database: ReturnType<typeof drizzle<typeof schema>> | undefined;
 
 export function getDb() {
-  if (!env.DB) {
-    throw new Error(
-      "Cloudflare D1 binding `DB` is unavailable. Set the `d1` field in .openai/hosting.json to `DB` or let your control plane inject the real binding values before using the database."
-    );
-  }
-
-  return drizzle(env.DB, { schema });
+  if (database) return database;
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is not configured. Add your Supabase transaction pooler URL in Vercel.');
+  // Transaction poolers cannot reuse prepared statements across connections.
+  const client = postgres(url, { prepare: false, max: 1, connect_timeout: 10, idle_timeout: 20 });
+  database = drizzle(client, { schema });
+  return database;
 }
