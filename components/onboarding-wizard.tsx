@@ -254,11 +254,11 @@ export function OnboardingWizard({ isOpen, onClose, onComplete, initialWorkspace
                       {isSelected ? (
                         <Check className="size-3.5 text-primary" />
                       ) : (
-                        <Badge variant="outline" className="text-[9px] px-1 py-0">{tpl.key}</Badge>
+                        <Badge variant="outline" className="text-xs px-1.5 py-0">{tpl.key}</Badge>
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground line-clamp-2">{tpl.description}</p>
-                    <span className="text-[10px] text-primary mt-1 font-medium">
+                    <p className="text-xs text-muted-foreground line-clamp-2">{tpl.description}</p>
+                    <span className="text-xs text-primary mt-1 font-medium">
                       {tpl.defaultIssues.length} sample tasks included
                     </span>
                   </button>
@@ -342,7 +342,7 @@ export function OnboardingWizard({ isOpen, onClose, onComplete, initialWorkspace
               ))}
             </div>
 
-            <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
               <Sparkles className="size-3.5 text-primary shrink-0" />
               You can always manage roles, invitations, and permissions in the People & Access tab.
             </p>

@@ -37,9 +37,17 @@ import {
   Filter,
   Eye,
   Activity,
-  Compass
+  Compass,
+  Paperclip,
+  MessageSquare,
+  MessageSquarePlus,
+  Send,
+  Download,
+  Maximize2,
+  FileText,
+  AlertCircle
 } from 'lucide-react';
-import { canManage, canEdit, canChangeMember, statuses, priorities } from '../lib/permissions';
+import { canManage, canEdit, canChangeMember, isClient, canViewInternal, statuses, priorities } from '../lib/permissions';
 import type { 
   Workspace, 
   Project, 
@@ -49,7 +57,15 @@ import type {
   Invitation, 
   UserProfile, 
   PriorityLevel, 
-  ProjectStatus 
+  ProjectStatus,
+  WorkspaceRole,
+  ProjectMilestone,
+  TaskAttachment,
+  Subtask,
+  ProjectMessage,
+  AppNotification,
+  PersonaUser,
+  IssueLabel
 } from '../types/workspace';
 import { 
   initialWorkspaces, 
@@ -59,7 +75,12 @@ import {
   initialActivities, 
   initialInvitations, 
   initialUserProfile, 
-  projectTemplates 
+  projectTemplates,
+  initialPersonas,
+  initialMilestones,
+  initialAttachments,
+  initialMessages,
+  initialNotifications
 } from '../lib/initial-data';
 import { CommandMenu } from '../components/command-menu';
 import { OnboardingWizard } from '../components/onboarding-wizard';
@@ -69,6 +90,13 @@ import { ProjectModal } from '../components/project-modal';
 import { WorkspaceModal } from '../components/workspace-modal';
 import { SettingsDialog } from '../components/settings-dialog';
 import { InstallButton } from '../components/install-button';
+import { PersonaSwitcher, ClientPortalBanner } from '../components/persona-switcher';
+import { NotificationsPopover } from '../components/notifications-popover';
+import { ProjectMilestones } from '../components/project-milestones';
+import { ProjectFiles } from '../components/project-files';
+import { ProjectChat } from '../components/project-chat';
+import { ClientFeedbackModal } from '../components/client-feedback-modal';
+import { MediaViewerModal } from '../components/media-viewer-modal';
 import {
   Dialog,
   DialogContent,
@@ -141,10 +169,13 @@ export default function WorkspaceApp() {
   // Primary navigation & view state
   const [page, setPage] = useState<'projects' | 'my-issues' | 'people'>('projects');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'Overview' | 'Board' | 'List' | 'People' | 'Settings'>('Board');
+  const [tab, setTab] = useState<'Overview' | 'Board' | 'List' | 'Timeline' | 'Files' | 'Chat' | 'Activity' | 'People' | 'Settings'>('Board');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [sidebar, setSidebar] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
+
+  // Active persona / role simulation
+  const [currentPersona, setCurrentPersona] = useState<PersonaUser>(initialPersonas[0]);
 
   // Filters
   const [query, setQuery] = useState('');
@@ -161,6 +192,10 @@ export default function WorkspaceApp() {
   const [activities, setActivities] = useState<ActivityItem[]>(initialActivities);
   const [invitations, setInvitations] = useState<Invitation[]>(initialInvitations);
   const [userProfile, setUserProfile] = useState<UserProfile>(initialUserProfile);
+  const [milestones, setMilestones] = useState<ProjectMilestone[]>(initialMilestones);
+  const [attachments, setAttachments] = useState<TaskAttachment[]>(initialAttachments);
+  const [messages, setMessages] = useState<ProjectMessage[]>(initialMessages);
+  const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
 
   // Modals & Panels state
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
@@ -178,6 +213,12 @@ export default function WorkspaceApp() {
   const [qiPriority, setQiPriority] = useState<PriorityLevel>('Medium');
   const [qiAssignee, setQiAssignee] = useState('unassigned');
   const [qiLabel, setQiLabel] = useState<string>('Task');
+  const [qiClientVisible, setQiClientVisible] = useState<boolean>(true);
+
+  // Client Feedback & Media Viewer Modals
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [feedbackTask, setFeedbackTask] = useState<Issue | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<TaskAttachment | null>(null);
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -204,6 +245,16 @@ export default function WorkspaceApp() {
       if (savedActivities) setActivities(JSON.parse(savedActivities));
       const savedProfile = localStorage.getItem('flowboard_profile');
       if (savedProfile) setUserProfile(JSON.parse(savedProfile));
+      const savedPersona = localStorage.getItem('flowboard_persona');
+      if (savedPersona) setCurrentPersona(JSON.parse(savedPersona));
+      const savedMilestones = localStorage.getItem('flowboard_milestones');
+      if (savedMilestones) setMilestones(JSON.parse(savedMilestones));
+      const savedAttachments = localStorage.getItem('flowboard_attachments');
+      if (savedAttachments) setAttachments(JSON.parse(savedAttachments));
+      const savedMessages = localStorage.getItem('flowboard_messages');
+      if (savedMessages) setMessages(JSON.parse(savedMessages));
+      const savedNotifications = localStorage.getItem('flowboard_notifications');
+      if (savedNotifications) setNotifications(JSON.parse(savedNotifications));
     } catch {
       // LocalStorage unavailable, use defaults
     }
@@ -272,34 +323,82 @@ export default function WorkspaceApp() {
     return workspaces.find(w => w.id === currentWsId) || workspaces[0] || initialWorkspaces[0];
   }, [workspaces, currentWsId]);
 
-  // Projects scoped to workspace
+  // Projects scoped to workspace and persona
   const workspaceProjects = useMemo(() => {
-    return allProjects.filter(p => !p.workspaceId || p.workspaceId === currentWorkspace.id);
-  }, [allProjects, currentWorkspace.id]);
+    let list = allProjects.filter(p => !p.workspaceId || p.workspaceId === currentWorkspace.id);
+    if (currentPersona.role === 'client') {
+      // Client strictly only accesses their assigned projects
+      list = list.filter(p => 
+        (p.clientEmail && p.clientEmail.toLowerCase() === currentPersona.email.toLowerCase()) ||
+        allMembers.some(m => m.projectId === p.id && (m.email?.toLowerCase() === currentPersona.email.toLowerCase() || m.role === 'client')) ||
+        p.id === 'proj-acme' ||
+        (p.clientCompany && p.clientCompany.toLowerCase() === currentPersona.company?.toLowerCase())
+      );
+    }
+    return list;
+  }, [allProjects, currentWorkspace.id, currentPersona, allMembers]);
 
   // Current Selected Project
   const currentProject = useMemo(() => {
     return workspaceProjects.find(p => p.id === selectedProjectId) || null;
   }, [workspaceProjects, selectedProjectId]);
 
-  // Project Members & Issues
+  // Project Members & Issues (with client visibility enforcement)
   const currentProjectMembers = useMemo(() => {
     if (!currentProject) return allMembers.filter(m => workspaceProjects.some(p => p.id === m.projectId));
     return allMembers.filter(m => m.projectId === currentProject.id);
   }, [allMembers, currentProject, workspaceProjects]);
 
   const currentProjectIssues = useMemo(() => {
-    if (!currentProject) return allIssues.filter(i => workspaceProjects.some(p => p.id === i.projectId));
-    return allIssues.filter(i => i.projectId === currentProject.id);
-  }, [allIssues, currentProject, workspaceProjects]);
+    let list = !currentProject 
+      ? allIssues.filter(i => workspaceProjects.some(p => p.id === i.projectId))
+      : allIssues.filter(i => i.projectId === currentProject.id);
+
+    if (currentPersona.role === 'client') {
+      // Clients only see issues flagged as client-visible
+      list = list.filter(i => i.isClientVisible !== false);
+    }
+    return list;
+  }, [allIssues, currentProject, workspaceProjects, currentPersona]);
+
+  // Scoped Milestones, Attachments, Messages
+  const currentProjectMilestones = useMemo(() => {
+    if (!currentProject) return milestones;
+    return milestones.filter(m => m.projectId === currentProject.id);
+  }, [milestones, currentProject]);
+
+  const currentProjectAttachments = useMemo(() => {
+    let list = !currentProject 
+      ? attachments.filter(a => workspaceProjects.some(p => p.id === a.projectId))
+      : attachments.filter(a => a.projectId === currentProject.id);
+    if (currentPersona.role === 'client') {
+      list = list.filter(a => !a.isInternalOnly);
+    }
+    return list;
+  }, [attachments, currentProject, workspaceProjects, currentPersona]);
+
+  const currentProjectMessages = useMemo(() => {
+    if (!currentProject) return [];
+    return messages.filter(m => m.projectId === currentProject.id);
+  }, [messages, currentProject]);
+
+  const userNotifications = useMemo(() => {
+    return notifications.filter(n => 
+      !n.recipientEmail || 
+      n.recipientEmail === currentPersona.email ||
+      (currentPersona.role === 'admin') ||
+      (currentPersona.role === 'project_manager' && n.recipientEmail.includes('pm'))
+    );
+  }, [notifications, currentPersona]);
 
   // User Role calculation
   const isDemo = !apiData?.projects?.length;
   const userRole = useMemo(() => {
+    if (currentPersona?.role) return currentPersona.role;
     if (!currentProject) return 'owner';
     const found = currentProjectMembers.find(m => m.email === userProfile.email || m.userId === apiData?.user?.userId);
     return (found?.role as string) || (isDemo ? 'owner' : 'viewer');
-  }, [currentProject, currentProjectMembers, userProfile.email, apiData?.user?.userId, isDemo]);
+  }, [currentPersona, currentProject, currentProjectMembers, userProfile.email, apiData?.user?.userId, isDemo]);
 
   // Log activity helper
   function addActivity(action: string, target: string) {
@@ -335,6 +434,239 @@ export default function WorkspaceApp() {
     setPriorityFilter('All priorities');
     setStatusFilter('All statuses');
     setSidebar(false);
+  }
+
+  // Persona Switching Handler
+  function handleSelectPersona(persona: PersonaUser) {
+    setCurrentPersona(persona);
+    persist('flowboard_persona', persona);
+
+    // Synchronize profile with persona
+    setUserProfile(prev => ({
+      ...prev,
+      displayName: persona.displayName,
+      email: persona.email,
+      title: persona.title,
+    }));
+
+    setNotice(`Switched persona to ${persona.displayName} · ${persona.role.replace('_', ' ').toUpperCase()}`);
+
+    // If switching to client, auto-route to their project workspace
+    if (persona.role === 'client') {
+      const clientProj = allProjects.find(p => 
+        (p.clientEmail && p.clientEmail.toLowerCase() === persona.email.toLowerCase()) ||
+        persona.assignedProjectIds.includes(p.id) ||
+        p.id === 'proj-acme'
+      );
+      if (clientProj) {
+        navigateToProject(clientProj.id, 'Overview');
+      }
+    }
+  }
+
+  // Milestones Handlers
+  function handleAddMilestone(data: Omit<ProjectMilestone, 'id'>) {
+    const newMilestone: ProjectMilestone = {
+      ...data,
+      id: 'ms-' + Date.now(),
+    };
+    const next = [...milestones, newMilestone];
+    setMilestones(next);
+    persist('flowboard_milestones', next);
+    addActivity('created milestone', newMilestone.title);
+    setNotice(`Milestone "${newMilestone.title}" created.`);
+  }
+
+  function handleUpdateMilestone(id: string, patch: Partial<ProjectMilestone>) {
+    const next = milestones.map(m => m.id === id ? { ...m, ...patch } : m);
+    setMilestones(next);
+    persist('flowboard_milestones', next);
+    const m = milestones.find(item => item.id === id);
+    if (m) addActivity('updated milestone', m.title);
+  }
+
+  // Attachments Handlers
+  function handleUploadAttachment(newAtt: Omit<TaskAttachment, 'id'>) {
+    const created: TaskAttachment = {
+      ...newAtt,
+      id: 'att-' + Date.now(),
+    };
+    const next = [created, ...attachments];
+    setAttachments(next);
+    persist('flowboard_attachments', next);
+    addActivity('uploaded file', created.name);
+    setNotice(`Uploaded ${created.name}`);
+  }
+
+  function handleDeleteAttachment(id: string) {
+    const next = attachments.filter(a => a.id !== id);
+    setAttachments(next);
+    persist('flowboard_attachments', next);
+    setNotice('File removed.');
+  }
+
+  // Project Chat Message Handler
+  function handleSendMessage(msg: {
+    projectId: string;
+    content: string;
+    replyToId?: string;
+    replyToSnippet?: string;
+    attachments?: TaskAttachment[];
+  }) {
+    if (!currentProject) return;
+
+    const newMsg: ProjectMessage = {
+      id: 'msg-' + Date.now(),
+      projectId: msg.projectId,
+      senderId: currentPersona.id,
+      senderName: currentPersona.displayName,
+      senderEmail: currentPersona.email,
+      senderRole: currentPersona.role,
+      content: msg.content,
+      createdAt: new Date().toISOString(),
+      replyToId: msg.replyToId,
+      replyToSnippet: msg.replyToSnippet,
+      attachments: msg.attachments,
+      isClientVisible: true,
+    };
+
+    const next = [...messages, newMsg];
+    setMessages(next);
+    persist('flowboard_messages', next);
+
+    // Notify counterpart role
+    if (currentPersona.role === 'client') {
+      const newNotif: AppNotification = {
+        id: 'notif-' + Date.now(),
+        recipientEmail: 'alex.pm@company.com',
+        title: `Client message in #${currentProject.name}`,
+        message: `${currentPersona.displayName}: "${msg.content.slice(0, 70)}${msg.content.length > 70 ? '...' : ''}"`,
+        type: 'chat_message',
+        projectId: currentProject.id,
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+      const nextNotifs = [newNotif, ...notifications];
+      setNotifications(nextNotifs);
+      persist('flowboard_notifications', nextNotifs);
+    } else {
+      const clientMember = currentProjectMembers.find(m => m.role === 'client');
+      if (clientMember) {
+        const newNotif: AppNotification = {
+          id: 'notif-' + Date.now(),
+          recipientEmail: clientMember.email,
+          title: `New update from ${currentPersona.displayName}`,
+          message: msg.content.slice(0, 80),
+          type: 'chat_message',
+          projectId: currentProject.id,
+          read: false,
+          createdAt: new Date().toISOString(),
+        };
+        const nextNotifs = [newNotif, ...notifications];
+        setNotifications(nextNotifs);
+        persist('flowboard_notifications', nextNotifs);
+      }
+    }
+  }
+
+  // Client Feedback Handler
+  function handleSubmitClientFeedback(feedback: {
+    title: string;
+    description: string;
+    label: IssueLabel;
+    priority: PriorityLevel;
+    attachment?: TaskAttachment;
+  }) {
+    if (!currentProject) return;
+
+    const maxNum = allIssues
+      .filter(i => i.projectId === currentProject.id)
+      .reduce((max, i) => Math.max(max, i.number), 100);
+    const newNum = maxNum + 1;
+
+    const newIssue: Issue = {
+      id: `iss-${currentProject.id}-${Date.now()}`,
+      projectId: currentProject.id,
+      number: newNum,
+      title: feedback.title,
+      description: feedback.description,
+      status: 'To do',
+      priority: feedback.priority,
+      label: feedback.label,
+      assignee: null,
+      creatorName: currentPersona.displayName,
+      createdAt: new Date().toISOString().split('T')[0],
+      isClientVisible: true,
+      attachments: feedback.attachment ? [feedback.attachment] : [],
+      subtasks: [],
+      comments: [
+        {
+          id: 'c-' + Date.now(),
+          authorName: currentPersona.displayName,
+          authorEmail: currentPersona.email,
+          authorRole: currentPersona.role,
+          content: `Initial client feedback submission:\n\n${feedback.description}`,
+          createdAt: 'Just now',
+          isInternalOnly: false,
+        }
+      ],
+    };
+
+    const nextIssues = [newIssue, ...allIssues];
+    setAllIssues(nextIssues);
+    persist('flowboard_issues', nextIssues);
+
+    if (feedback.attachment) {
+      const nextAtts = [feedback.attachment, ...attachments];
+      setAttachments(nextAtts);
+      persist('flowboard_attachments', nextAtts);
+    }
+
+    // In-app notification for PM
+    const newNotif: AppNotification = {
+      id: 'notif-' + Date.now(),
+      recipientEmail: 'alex.pm@company.com',
+      title: `Client Feedback: ${currentProject.key}-${newNum}`,
+      message: `${currentPersona.displayName} submitted "${feedback.title}"`,
+      type: 'client_feedback',
+      projectId: currentProject.id,
+      issueId: newIssue.id,
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+    const nextNotifs = [newNotif, ...notifications];
+    setNotifications(nextNotifs);
+    persist('flowboard_notifications', nextNotifs);
+
+    addActivity('submitted client feedback', `${currentProject.key}-${newNum}`);
+    setNotice(`Feedback logged as ${currentProject.key}-${newNum}! Your team has been notified.`);
+    setIsFeedbackModalOpen(false);
+    setFeedbackTask(null);
+  }
+
+  // Notifications Handlers
+  function handleMarkAllNotificationsRead() {
+    const updated = notifications.map(n => ({ ...n, read: true }));
+    setNotifications(updated);
+    persist('flowboard_notifications', updated);
+  }
+
+  function handleNotificationClick(notif: AppNotification) {
+    const updated = notifications.map(n => n.id === notif.id ? { ...n, read: true } : n);
+    setNotifications(updated);
+    persist('flowboard_notifications', updated);
+
+    if (notif.projectId) {
+      if (notif.issueId) {
+        navigateToProject(notif.projectId, 'Board');
+        const issue = allIssues.find(i => i.id === notif.issueId);
+        if (issue) setActiveDrawerIssue(issue);
+      } else if (notif.type === 'chat_message') {
+        navigateToProject(notif.projectId, 'Chat');
+      } else {
+        navigateToProject(notif.projectId, 'Overview');
+      }
+    }
   }
 
   // Workspace Actions (Flow 2)
@@ -694,6 +1026,9 @@ export default function WorkspaceApp() {
       assignee: qiAssignee && qiAssignee !== 'unassigned' ? qiAssignee : null,
       createdAt: new Date().toISOString().split('T')[0],
       comments: [],
+      isClientVisible: qiClientVisible,
+      attachments: [],
+      subtasks: [],
     };
 
     const nextIssues = [newIssue, ...allIssues];
@@ -786,6 +1121,30 @@ export default function WorkspaceApp() {
         members={currentProjectMembers}
         projectKey={currentProject?.key || 'TASK'}
         canEdit={canEdit(userRole)}
+        canManage={canManage(userRole)}
+        isClientUser={currentPersona.role === 'client'}
+        currentUserName={currentPersona.displayName}
+        currentUserEmail={currentPersona.email}
+      />
+
+      {/* CLIENT FEEDBACK MODAL */}
+      <ClientFeedbackModal
+        isOpen={isFeedbackModalOpen}
+        onClose={() => {
+          setIsFeedbackModalOpen(false);
+          setFeedbackTask(null);
+        }}
+        projectId={currentProject?.id || ''}
+        projectName={currentProject?.name || ''}
+        clientName={currentPersona.displayName}
+        clientEmail={currentPersona.email}
+        onSubmitFeedback={handleSubmitClientFeedback}
+      />
+
+      {/* MEDIA VIEWER MODAL (Images, Videos & Documents) */}
+      <MediaViewerModal
+        attachment={previewAttachment}
+        onClose={() => setPreviewAttachment(null)}
       />
 
       {/* FIRST TIME ONBOARDING WIZARD */}
@@ -950,7 +1309,7 @@ export default function WorkspaceApp() {
               type="button" 
               aria-label="Personal settings"
               onClick={() => setIsSettingsOpen(true)}
-              style={{ padding: '4px', color: '#a69db0' }}
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-md"
             >
               <Settings size={16} />
             </button>
@@ -1020,19 +1379,20 @@ export default function WorkspaceApp() {
           </div>
 
           <div className="top-actions">
-            <span className="today">
-              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-            </span>
+            {/* Interactive Persona Switcher */}
+            <PersonaSwitcher
+              currentPersona={currentPersona}
+              onSelectPersona={handleSelectPersona}
+            />
+
             <span className="divider" />
 
-            <button 
-              aria-label="Activity Feed" 
-              className="notification-button" 
-              onClick={() => setMenu(menu === 'activity' ? null : 'activity')}
-            >
-              <Bell size={19} />
-              <i />
-            </button>
+            {/* In-App Notifications Center */}
+            <NotificationsPopover
+              notifications={userNotifications}
+              onMarkAllRead={handleMarkAllNotificationsRead}
+              onSelectNotification={handleNotificationClick}
+            />
 
             <button 
               aria-label="Workspace Settings" 
@@ -1048,23 +1408,15 @@ export default function WorkspaceApp() {
               <Avatar name={userProfile.displayName} small />
             </button>
           </div>
-
-          {/* Activity Dropdown Popover */}
-          {menu === 'activity' && (
-            <div className="activity-popover">
-              <strong>Workspace Activity</strong>
-              <p>Latest timeline updates in {currentWorkspace.name}:</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px', maxHeight: '220px', overflowY: 'auto' }}>
-                {activities.slice(0, 6).map(act => (
-                  <div key={act.id} style={{ fontSize: '10px', borderBottom: '1px solid #f1ecf5', paddingBottom: '6px' }}>
-                    <strong style={{ color: '#554167' }}>{act.actorName}</strong> {act.action} <span style={{ color: '#8867cb' }}>{act.target}</span>
-                    <small style={{ display: 'block', color: '#b6a6c4', fontSize: '8px' }}>{act.timestamp}</small>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </header>
+
+        {/* Client Portal Indicator Banner when viewing as Client */}
+        {currentPersona.role === 'client' && (
+          <ClientPortalBanner
+            currentPersona={currentPersona}
+            onSwitchToAdmin={() => handleSelectPersona(initialPersonas[0])}
+          />
+        )}
 
         {/* CONTENT AREA */}
         <div className="page-content">
@@ -1352,31 +1704,49 @@ export default function WorkspaceApp() {
                 </div>
 
                 <div className="heading-actions">
-                  {canManage(userRole) && (
-                    <Button variant="outline" onClick={() => setIsInviteModalOpen(true)}>
-                      <Users data-icon="inline-start" /> Add people
+                  {currentPersona.role === 'client' ? (
+                    <Button 
+                      className="bg-primary text-primary-foreground gap-2 font-semibold shadow-xs"
+                      onClick={() => {
+                        setFeedbackTask(null);
+                        setIsFeedbackModalOpen(true);
+                      }}
+                    >
+                      <MessageSquarePlus className="size-4" /> Submit Feedback
                     </Button>
+                  ) : (
+                    <>
+                      {canManage(userRole) && (
+                        <Button variant="outline" onClick={() => setIsInviteModalOpen(true)}>
+                          <Users data-icon="inline-start" /> Add people
+                        </Button>
+                      )}
+                      <Button 
+                        onClick={() => {
+                          setQuickIssueInitialStatus('To do');
+                          setIsQuickIssueModalOpen(true);
+                        }}
+                        disabled={!canEdit(userRole)}
+                      >
+                        <Plus data-icon="inline-start" /> Create issue
+                      </Button>
+                    </>
                   )}
-                  <Button 
-                    onClick={() => {
-                      setQuickIssueInitialStatus('To do');
-                      setIsQuickIssueModalOpen(true);
-                    }}
-                    disabled={!canEdit(userRole)}
-                  >
-                    <Plus data-icon="inline-start" /> Create issue
-                  </Button>
                 </div>
               </div>
 
-              {/* 5 Project Navigation Tabs */}
+              {/* Complete Project Workspace Navigation (8 Sections) */}
               <div className="project-tabs">
                 {[
                   { id: 'Overview', label: 'Overview', icon: BarChart3 },
                   { id: 'Board', label: 'Board', icon: FolderKanban },
-                  { id: 'List', label: 'List', icon: List },
-                  { id: 'People', label: 'People', icon: Users, badge: currentProjectMembers.length },
-                  { id: 'Settings', label: 'Settings', icon: Settings },
+                  { id: 'List', label: 'Tasks', icon: List, badge: currentProjectIssues.length },
+                  { id: 'Timeline', label: 'Timeline', icon: CalendarDays, badge: currentProjectMilestones.length || undefined },
+                  { id: 'Files', label: 'Files & Media', icon: Paperclip, badge: currentProjectAttachments.length || undefined },
+                  { id: 'Chat', label: 'Project Chat', icon: MessageSquare, badge: currentProjectMessages.length || undefined },
+                  { id: 'Activity', label: 'Activity', icon: Activity },
+                  { id: 'People', label: 'Team', icon: Users, badge: currentProjectMembers.length },
+                  ...(canManage(userRole) ? [{ id: 'Settings', label: 'Settings', icon: Settings }] : []),
                 ].map(t => {
                   const Icon = t.icon;
                   return (
@@ -1394,7 +1764,7 @@ export default function WorkspaceApp() {
 
                 <span className="access-chip">
                   <ShieldCheck size={13} />
-                  {userRole[0].toUpperCase() + userRole.slice(1)} access
+                  {userRole.replace('_', ' ')[0].toUpperCase() + userRole.replace('_', ' ').slice(1)} access
                 </span>
               </div>
 
@@ -1573,6 +1943,89 @@ export default function WorkspaceApp() {
                     />
                   )}
                 </>
+              )}
+
+              {/* TAB: TIMELINE & MILESTONES */}
+              {tab === 'Timeline' && (
+                <ProjectMilestones
+                  project={currentProject}
+                  milestones={currentProjectMilestones}
+                  issues={currentProjectIssues}
+                  canManage={canManage(userRole)}
+                  onAddMilestone={handleAddMilestone}
+                  onUpdateMilestone={handleUpdateMilestone}
+                  onOpenIssue={issue => setActiveDrawerIssue(issue)}
+                />
+              )}
+
+              {/* TAB: FILES & REFERENCES */}
+              {tab === 'Files' && (
+                <ProjectFiles
+                  project={currentProject}
+                  attachments={currentProjectAttachments}
+                  canUpload={canEdit(userRole) || isClient(userRole)}
+                  canManage={canManage(userRole)}
+                  isClientUser={currentPersona.role === 'client'}
+                  onUploadAttachment={handleUploadAttachment}
+                  onDeleteAttachment={handleDeleteAttachment}
+                  onPreviewAttachment={att => setPreviewAttachment(att)}
+                />
+              )}
+
+              {/* TAB: PROJECT CHAT */}
+              {tab === 'Chat' && (
+                <ProjectChat
+                  project={currentProject}
+                  messages={currentProjectMessages}
+                  currentUserName={currentPersona.displayName}
+                  currentUserEmail={currentPersona.email}
+                  currentUserRole={currentPersona.role}
+                  onSendMessage={handleSendMessage}
+                  onOpenIssueByKey={key => {
+                    const num = parseInt(key.split('-')[1]);
+                    if (!isNaN(num)) {
+                      const issue = allIssues.find(i => i.projectId === currentProject.id && i.number === num);
+                      if (issue) setActiveDrawerIssue(issue);
+                    }
+                  }}
+                />
+              )}
+
+              {/* TAB: AUDIT TIMELINE & ACTIVITY */}
+              {tab === 'Activity' && (
+                <div className="rounded-xl border border-border bg-card p-6 shadow-xs">
+                  <div className="flex items-center justify-between mb-6 pb-4 border-b border-border">
+                    <div>
+                      <h2 className="text-lg font-bold text-foreground">Project Timeline & Audit Trail</h2>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Chronological record of status changes, client submissions, and deliverables in {currentProject.name}.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="text-xs font-mono">
+                      {activities.filter(a => !a.projectId || a.projectId === currentProject.id).length} events
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-4">
+                    {activities
+                      .filter(a => !a.projectId || a.projectId === currentProject.id)
+                      .map((act) => (
+                        <div key={act.id} className="flex items-start gap-3 text-sm pb-3 border-b border-border/60 last:border-0">
+                          <Avatar name={act.actorName} small />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-2 flex-wrap">
+                              <span className="font-semibold text-foreground text-xs">{act.actorName}</span>
+                              <span className="text-xs text-muted-foreground">{act.action}</span>
+                              <span className="text-xs font-medium text-primary">{act.target}</span>
+                            </div>
+                            <span className="text-[11px] text-muted-foreground mt-1 block">
+                              {act.timestamp}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
               )}
 
               {/* TAB 4: PEOPLE & ACCESS */}
@@ -1876,7 +2329,7 @@ export default function WorkspaceApp() {
                 <label htmlFor="qi-description" className="text-xs font-medium text-foreground">
                   Description
                 </label>
-                <span className="text-[11px] text-muted-foreground">optional</span>
+                <span className="text-xs text-muted-foreground">optional</span>
               </div>
               <Textarea
                 id="qi-description"
@@ -1975,6 +2428,19 @@ export default function WorkspaceApp() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1 pb-1">
+              <input
+                type="checkbox"
+                id="qi-client-visible"
+                checked={qiClientVisible}
+                onChange={(e) => setQiClientVisible(e.target.checked)}
+                className="size-4 rounded border-border text-primary focus:ring-primary accent-primary cursor-pointer"
+              />
+              <label htmlFor="qi-client-visible" className="text-xs text-foreground cursor-pointer select-none">
+                Visible to client in their project portal
+              </label>
             </div>
 
             <DialogFooter className="gap-2 sm:gap-0 mt-3">
@@ -2076,6 +2542,12 @@ export default function WorkspaceApp() {
   );
 }
 
+function isOverdue(dueDate?: string, status?: string): boolean {
+  if (!dueDate || status === 'Done') return false;
+  const today = new Date().toISOString().split('T')[0];
+  return dueDate < today;
+}
+
 function IssueTable({
   items,
   projects,
@@ -2092,9 +2564,10 @@ function IssueTable({
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border">
-            <TableHead className="w-[48%] text-xs font-semibold text-muted-foreground py-3">Issue</TableHead>
+            <TableHead className="w-[42%] text-xs font-semibold text-muted-foreground py-3">Issue</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground py-3">Status</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground py-3">Priority</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground py-3">Due Date</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground py-3 text-right pr-4">Assignee</TableHead>
           </TableRow>
         </TableHeader>
@@ -2102,6 +2575,10 @@ function IssueTable({
           {items.map((i) => {
             const project = projects.find((p) => p.id === i.projectId);
             const assignee = members.find((m) => m.id === i.assignee);
+            const overdue = isOverdue(i.dueDate, i.status);
+            const completedSubs = i.subtasks?.filter(s => s.completed).length || 0;
+            const totalSubs = i.subtasks?.length || 0;
+
             return (
               <TableRow
                 key={i.id}
@@ -2109,16 +2586,26 @@ function IssueTable({
                 onClick={() => onOpen(i)}
               >
                 <TableCell className="py-3 font-medium">
-                  <div className="flex items-center gap-2.5">
-                    <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="outline" className="text-xs font-mono shrink-0">
                       {project?.key || 'ISSUE'}-{i.number}
                     </Badge>
-                    <span className="text-xs font-medium text-foreground truncate max-w-[340px]">
+                    <span className="text-sm font-medium text-foreground truncate max-w-[340px]">
                       {i.title}
                     </span>
-                    <Badge variant="secondary" className="text-[10px] shrink-0">
+                    <Badge variant="secondary" className="text-xs shrink-0">
                       {i.label}
                     </Badge>
+                    {totalSubs > 0 && (
+                      <span className="text-[11px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        ✓ {completedSubs}/{totalSubs}
+                      </span>
+                    )}
+                    {i.isClientVisible && (
+                      <Badge variant="outline" className="text-[10px] text-primary border-primary/30 shrink-0">
+                        Client visible
+                      </Badge>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell className="py-3">
@@ -2132,6 +2619,17 @@ function IssueTable({
                     <Flag className="size-3" />
                     {i.priority}
                   </span>
+                </TableCell>
+                <TableCell className="py-3">
+                  {i.dueDate ? (
+                    <span className={`text-xs flex items-center gap-1 ${overdue ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                      {overdue && <AlertCircle className="size-3 text-destructive" />}
+                      {i.dueDate}
+                      {overdue && <span className="text-[10px] uppercase font-bold tracking-wider ml-0.5">(Overdue)</span>}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
                 </TableCell>
                 <TableCell className="py-3 text-right pr-4">
                   {assignee ? (

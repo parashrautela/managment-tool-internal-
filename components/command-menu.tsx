@@ -144,7 +144,7 @@ export function CommandMenu({
               >
                 <span className={`project-dot ${p.color}`} />
                 <span className="flex-1 font-medium">{p.name}</span>
-                <Badge variant="secondary" className="text-[10px]">
+                <Badge variant="secondary" className="text-xs">
                   {p.key}
                 </Badge>
               </CommandItem>
@@ -173,7 +173,7 @@ export function CommandMenu({
                     {parentProj?.key || 'ISSUE'}-{i.number}
                   </span>
                   <span className="flex-1 truncate">{i.title}</span>
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-xs">
                     {i.label}
                   </Badge>
                 </CommandItem>
@@ -201,7 +201,7 @@ export function CommandMenu({
                 <span className="text-xs text-muted-foreground truncate max-w-[140px] mr-2">
                   {m.email}
                 </span>
-                <Badge variant="secondary" className="capitalize text-[10px]">
+                <Badge variant="secondary" className="capitalize text-xs">
                   {m.role}
                 </Badge>
               </CommandItem>
@@ -228,7 +228,7 @@ export function CommandMenu({
                   <Building2 className="text-primary" />
                   <span className="flex-1 font-medium">{w.name}</span>
                   {isCurrent ? (
-                    <Badge variant="default" className="text-[10px]">
+                    <Badge variant="default" className="text-xs">
                       Active
                     </Badge>
                   ) : (

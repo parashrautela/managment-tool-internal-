@@ -139,7 +139,7 @@ export default function Login() {
 
               <div className="relative my-2">
                 <Separator />
-                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-[10px] text-muted-foreground uppercase tracking-wider">
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   or with email
                 </span>
               </div>
@@ -196,7 +196,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                 />
                 {mode === 'signup' && (
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     Must be at least 8 characters with letters and numbers.
                   </span>
                 )}
@@ -228,7 +228,7 @@ export default function Login() {
             <Sparkles className="size-4 text-primary shrink-0" />
             <div className="flex flex-col flex-1 min-w-0">
               <strong className="text-xs font-semibold text-primary">Exploring as a guest?</strong>
-              <p className="text-[11px] text-muted-foreground">Access the fully interactive workspace demo.</p>
+              <p className="text-xs text-muted-foreground">Access the fully interactive workspace demo.</p>
             </div>
             <Button asChild size="sm" variant="default" className="shrink-0 text-xs gap-1">
               <Link href="/">
@@ -272,7 +272,7 @@ export default function Login() {
             )}
           </div>
 
-          <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground text-center">
+          <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground text-center">
             <ShieldCheck className="size-3.5 text-muted-foreground/80 shrink-0" />
             Projects are private and scoped to verified workspace members.
           </p>

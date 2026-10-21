@@ -9,6 +9,12 @@ import {
   ArrowUpRight, 
   Flag, 
   Activity,
+  AlertTriangle,
+  Building2,
+  Briefcase,
+  Target,
+  Sparkles,
+  Lock
 } from 'lucide-react';
 import type { Project, Member, Issue, ActivityItem } from '../types/workspace';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -36,6 +42,7 @@ interface ProjectOverviewProps {
   onInvite: () => void;
   onUpdateProject?: (updated: Partial<Project>) => void;
   canEdit: boolean;
+  isClientUser?: boolean;
 }
 
 export function ProjectOverview({
@@ -48,11 +55,15 @@ export function ProjectOverview({
   onInvite,
   onUpdateProject,
   canEdit,
+  isClientUser = false,
 }: ProjectOverviewProps) {
   const total = issues.length;
   const completed = issues.filter((i) => i.status === 'Done').length;
   const inProgress = issues.filter((i) => i.status === 'In progress').length;
   const inReview = issues.filter((i) => i.status === 'In review').length;
+  const blocked = issues.filter((i) => i.status === 'Blocked').length;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const overdue = issues.filter((i) => i.dueDate && i.dueDate < todayStr && i.status !== 'Done').length;
   const backlog = issues.filter((i) => i.status === 'Backlog' || i.status === 'To do').length;
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
 
@@ -82,7 +93,7 @@ export function ProjectOverview({
       <Card className="border-border shadow-xs">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
           <div className="flex items-center gap-3">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Project Health:
             </span>
             {canEdit ? (
@@ -128,34 +139,54 @@ export function ProjectOverview({
         <CardContent className="flex flex-col gap-6 pt-0">
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-muted-foreground">Overall completion</span>
+              <span className="text-muted-foreground">Overall completion progress</span>
               <strong className="font-semibold text-foreground">
-                {percent}% complete ({completed} of {total} items)
+                {percent}% complete ({completed} of {total} deliverables)
               </strong>
             </div>
-            <Progress value={percent} className="h-2" />
+            <Progress value={percent} className="h-2.5" />
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Real Metrics Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <div className="flex flex-col p-3 rounded-lg border border-border bg-card">
               <span className="text-xs text-muted-foreground">Completed</span>
               <strong className="text-2xl font-bold text-emerald-600 mt-1">{completed}</strong>
-              <span className="text-[10px] text-muted-foreground">Shipped to done</span>
+              <span className="text-xs text-muted-foreground">Delivered & verified</span>
             </div>
+
             <div className="flex flex-col p-3 rounded-lg border border-border bg-card">
-              <span className="text-xs text-muted-foreground">In flight</span>
+              <span className="text-xs text-muted-foreground">In Flight</span>
               <strong className="text-2xl font-bold text-primary mt-1">{inProgress + inReview}</strong>
-              <span className="text-[10px] text-muted-foreground">{inProgress} active · {inReview} review</span>
+              <span className="text-xs text-muted-foreground">{inProgress} active · {inReview} review</span>
             </div>
+
+            <div className={`flex flex-col p-3 rounded-lg border ${blocked > 0 ? 'border-amber-500/40 bg-amber-500/5' : 'border-border bg-card'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Blocked</span>
+                {blocked > 0 && <AlertTriangle className="size-3.5 text-amber-500" />}
+              </div>
+              <strong className={`text-2xl font-bold mt-1 ${blocked > 0 ? 'text-amber-600' : 'text-foreground'}`}>
+                {blocked}
+              </strong>
+              <span className="text-xs text-muted-foreground">Requires unblocking</span>
+            </div>
+
+            <div className={`flex flex-col p-3 rounded-lg border ${overdue > 0 ? 'border-destructive/40 bg-destructive/5' : 'border-border bg-card'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Overdue</span>
+                {overdue > 0 && <Clock className="size-3.5 text-destructive" />}
+              </div>
+              <strong className={`text-2xl font-bold mt-1 ${overdue > 0 ? 'text-destructive' : 'text-foreground'}`}>
+                {overdue}
+              </strong>
+              <span className="text-xs text-muted-foreground">Past due date</span>
+            </div>
+
             <div className="flex flex-col p-3 rounded-lg border border-border bg-card">
               <span className="text-xs text-muted-foreground">Backlog</span>
               <strong className="text-2xl font-bold text-foreground mt-1">{backlog}</strong>
-              <span className="text-[10px] text-muted-foreground">Scheduled for later</span>
-            </div>
-            <div className="flex flex-col p-3 rounded-lg border border-border bg-card">
-              <span className="text-xs text-muted-foreground">Team size</span>
-              <strong className="text-2xl font-bold text-blue-600 mt-1">{projectMembers.length}</strong>
-              <span className="text-[10px] text-muted-foreground">Active collaborators</span>
+              <span className="text-xs text-muted-foreground">Scheduled queue</span>
             </div>
           </div>
         </CardContent>
@@ -163,17 +194,18 @@ export function ProjectOverview({
 
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2 spans): Active Issues & Mission */}
+        {/* Left Column (2 spans): Active Tasks & Objectives */}
         <div className="lg:col-span-2 flex flex-col gap-6">
+          {/* Active Tasks Card */}
           <Card className="border-border shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
-                <CardTitle className="text-base font-semibold">Active Issues</CardTitle>
+                <CardTitle className="text-base font-semibold">Active Deliverables</CardTitle>
                 <CardDescription className="text-xs">Top priorities currently in motion</CardDescription>
               </div>
               {canEdit && (
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={onCreateIssue}>
-                  <Plus data-icon="inline-start" /> New issue
+                  <Plus className="size-4" /> New task
                 </Button>
               )}
             </CardHeader>
@@ -186,18 +218,23 @@ export function ProjectOverview({
                   onClick={() => onOpenIssue(issue)}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <Badge variant="outline" className="text-[10px] shrink-0">
+                    <Badge variant="outline" className="text-xs shrink-0">
                       {issue.label}
                     </Badge>
-                    <span className="text-xs font-medium text-foreground truncate">
+                    <span className="text-sm font-medium text-foreground truncate">
                       {issue.title}
                     </span>
+                    {issue.status === 'Blocked' && (
+                      <Badge variant="destructive" className="text-[10px] px-1 py-0">
+                        Blocked
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="secondary" className="text-[10px]">
+                    <Badge variant="secondary" className="text-xs">
                       {issue.status}
                     </Badge>
-                    <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
                       <Flag className="size-3" /> {issue.priority}
                     </span>
                     <ArrowUpRight className="size-3.5 text-muted-foreground" />
@@ -208,27 +245,69 @@ export function ProjectOverview({
               {issues.length === 0 && (
                 <div className="flex flex-col items-center justify-center p-8 text-center text-muted-foreground">
                   <CheckCircle2 className="size-8 text-muted-foreground/60 mb-2" />
-                  <p className="text-xs">No issues yet. Create one to kick off progress!</p>
+                  <p className="text-xs">No tasks recorded yet.</p>
                 </div>
               )}
             </CardContent>
           </Card>
 
+          {/* Project Mission & Objectives */}
           <Card className="border-border shadow-xs">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">About this project</CardTitle>
+              <div className="flex items-center gap-2">
+                <Target className="size-4 text-primary" />
+                <CardTitle className="text-sm font-semibold">Objectives & Strategic Goals</CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground leading-relaxed">
+            <CardContent className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground leading-relaxed">
                 {project.description ||
                   'No detailed mission description yet. Keep your team aligned with clear project goals.'}
               </p>
+
+              {project.objectives && project.objectives.length > 0 && (
+                <div className="flex flex-col gap-2 pt-2 border-t border-border">
+                  <span className="text-xs font-semibold text-foreground">Key Milestones & Outcomes:</span>
+                  <div className="flex flex-col gap-1.5">
+                    {project.objectives.map((obj, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs text-foreground">
+                        <CheckCircle2 className="size-3.5 text-primary shrink-0 mt-0.5" />
+                        <span>{obj}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Right Column (1 span): Team & Activity */}
+        {/* Right Column (1 span): Stakeholders, Team & Activity */}
         <div className="flex flex-col gap-6">
+          {/* Client & Management Stakeholders Card */}
+          <Card className="border-border shadow-xs">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <Building2 className="size-4 text-primary" />
+                <CardTitle className="text-sm font-semibold">Client & Project Lead</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 pt-0 text-xs">
+              <div className="flex flex-col gap-1 p-2.5 rounded-lg bg-muted/40 border border-border">
+                <span className="text-muted-foreground text-[11px] font-semibold uppercase">Client Stakeholder</span>
+                <strong className="text-foreground text-xs">{project.clientCompany || 'Acme Corporation'}</strong>
+                <span className="text-muted-foreground">{project.clientContactName || 'Emma Watson'} · {project.clientContactEmail || 'emma.watson@acmeclient.com'}</span>
+              </div>
+
+              <div className="flex flex-col gap-1 p-2.5 rounded-lg bg-muted/40 border border-border">
+                <span className="text-muted-foreground text-[11px] font-semibold uppercase">Assigned Project Manager</span>
+                <strong className="text-foreground text-xs">{project.projectManagerName || 'Alex Morgan'}</strong>
+                <span className="text-muted-foreground">Delivery & Client Coordination</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Team roster */}
           <Card className="border-border shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
@@ -237,7 +316,7 @@ export function ProjectOverview({
               </div>
               {canEdit && (
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={onInvite}>
-                  <Users data-icon="inline-start" /> Add
+                  <Users className="size-3.5" /> Add
                 </Button>
               )}
             </CardHeader>
@@ -250,8 +329,8 @@ export function ProjectOverview({
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col min-w-0 flex-1">
-                    <strong className="text-xs font-medium text-foreground truncate">{m.name}</strong>
-                    <span className="text-[10px] text-muted-foreground truncate">
+                    <strong className="text-sm font-medium text-foreground truncate">{m.name}</strong>
+                    <span className="text-xs text-muted-foreground truncate">
                       {m.role} · {m.title || m.email}
                     </span>
                   </div>
@@ -260,6 +339,7 @@ export function ProjectOverview({
             </CardContent>
           </Card>
 
+          {/* Recent Activity */}
           <Card className="border-border shadow-xs">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-semibold">Recent activity</CardTitle>
@@ -270,11 +350,11 @@ export function ProjectOverview({
                 <div key={act.id} className="flex items-start gap-2.5 text-xs">
                   <span className="size-2 rounded-full bg-primary shrink-0 mt-1.5" />
                   <div className="flex flex-col gap-0.5">
-                    <p className="text-foreground">
+                    <p className="text-foreground text-xs">
                       <strong>{act.actorName}</strong> {act.action}{' '}
                       <span className="font-medium text-primary">{act.target}</span>
                     </p>
-                    <span className="text-[10px] text-muted-foreground">{act.timestamp}</span>
+                    <span className="text-xs text-muted-foreground">{act.timestamp}</span>
                   </div>
                 </div>
               ))}

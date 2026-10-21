@@ -52,6 +52,11 @@ interface ProjectModalProps {
     startDate?: string;
     dueDate?: string;
     health?: 'On track' | 'At risk' | 'Delayed';
+    clientCompany?: string;
+    clientContactName?: string;
+    clientContactEmail?: string;
+    projectManagerName?: string;
+    objectives?: string[];
     templateId?: string;
     action?: 'create' | 'update' | 'archive' | 'delete';
   }) => Promise<void>;
@@ -79,6 +84,11 @@ export function ProjectModal({
   const [startDate, setStartDate] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [health, setHealth] = useState<'On track' | 'At risk' | 'Delayed'>('On track');
+  const [clientCompany, setClientCompany] = useState('');
+  const [clientContactName, setClientContactName] = useState('');
+  const [clientContactEmail, setClientContactEmail] = useState('');
+  const [projectManagerName, setProjectManagerName] = useState('Alex Morgan');
+  const [objectivesText, setObjectivesText] = useState('');
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -96,6 +106,11 @@ export function ProjectModal({
       setStartDate(projectToEdit.startDate || '');
       setDueDate(projectToEdit.dueDate || '');
       setHealth(projectToEdit.health || 'On track');
+      setClientCompany(projectToEdit.clientCompany || '');
+      setClientContactName(projectToEdit.clientContactName || '');
+      setClientContactEmail(projectToEdit.clientContactEmail || '');
+      setProjectManagerName(projectToEdit.projectManagerName || 'Alex Morgan');
+      setObjectivesText((projectToEdit.objectives || []).join('\n'));
       setTab('scratch');
       setConfirmDelete(false);
     } else {
@@ -108,6 +123,11 @@ export function ProjectModal({
       setStartDate('');
       setDueDate('');
       setHealth('On track');
+      setClientCompany('Acme Corporation');
+      setClientContactName('Emma Watson');
+      setClientContactEmail('emma.watson@acmeclient.com');
+      setProjectManagerName('Alex Morgan');
+      setObjectivesText('Deliver phase milestones on time\nMaintain WCAG AA compliance');
       setSelectedTemplateId(null);
       setTab('scratch');
       setConfirmDelete(false);
@@ -140,6 +160,11 @@ export function ProjectModal({
     setBusy(true);
     setError('');
     try {
+      const parsedObjectives = objectivesText
+        .split('\n')
+        .map((o) => o.trim())
+        .filter(Boolean);
+
       await onSaveProject({
         id: projectToEdit?.id,
         name: name.trim(),
@@ -151,6 +176,11 @@ export function ProjectModal({
         startDate: startDate || undefined,
         dueDate: dueDate || undefined,
         health,
+        clientCompany: clientCompany.trim() || undefined,
+        clientContactName: clientContactName.trim() || undefined,
+        clientContactEmail: clientContactEmail.trim() || undefined,
+        projectManagerName: projectManagerName.trim() || undefined,
+        objectives: parsedObjectives.length > 0 ? parsedObjectives : undefined,
         templateId: selectedTemplateId || undefined,
         action: isEditing ? 'update' : 'create',
       });
@@ -236,7 +266,7 @@ export function ProjectModal({
                     <div className="flex items-center gap-2">
                       <span className={`project-dot ${tpl.color}`} />
                       <strong className="text-sm font-semibold">{tpl.name}</strong>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-xs">
                         {tpl.key}
                       </Badge>
                     </div>
@@ -289,7 +319,7 @@ export function ProjectModal({
                 onChange={(e) => setKey(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                 className="uppercase"
               />
-              <span className="text-[10px] text-muted-foreground">Unique identifier prefix</span>
+              <span className="text-xs text-muted-foreground">Unique identifier prefix</span>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -317,7 +347,7 @@ export function ProjectModal({
               <label htmlFor="proj-desc" className="text-xs font-medium text-foreground">
                 Description
               </label>
-              <span className="text-[11px] text-muted-foreground">optional</span>
+              <span className="text-xs text-muted-foreground">optional</span>
             </div>
             <Textarea
               id="proj-desc"
@@ -393,6 +423,67 @@ export function ProjectModal({
             </div>
           </div>
 
+          {/* Client & Team Assignment Section */}
+          <div className="p-3.5 rounded-xl border border-border bg-muted/20 flex flex-col gap-3">
+            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              Client Stakeholder & Collaboration
+            </span>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="proj-client-co" className="text-xs font-medium text-muted-foreground">
+                  Client Organization
+                </label>
+                <Input
+                  id="proj-client-co"
+                  placeholder="e.g. Acme Corp"
+                  value={clientCompany}
+                  onChange={(e) => setClientCompany(e.target.value)}
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="proj-client-email" className="text-xs font-medium text-muted-foreground">
+                  Client Contact Email
+                </label>
+                <Input
+                  id="proj-client-email"
+                  type="email"
+                  placeholder="emma@acme.com"
+                  value={clientContactEmail}
+                  onChange={(e) => setClientContactEmail(e.target.value)}
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="proj-pm" className="text-xs font-medium text-muted-foreground">
+                Assigned Project Lead / Manager
+              </label>
+              <Input
+                id="proj-pm"
+                placeholder="e.g. Alex Morgan"
+                value={projectManagerName}
+                onChange={(e) => setProjectManagerName(e.target.value)}
+                className="h-8 text-xs bg-background"
+              />
+            </div>
+          </div>
+
+          {/* Project Objectives */}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="proj-objectives" className="text-xs font-medium text-foreground">
+              Objectives & Key Results (one per line)
+            </label>
+            <Textarea
+              id="proj-objectives"
+              rows={2}
+              placeholder="e.g. Increase conversion rate by 24%&#10;Deliver WCAG AA compliance"
+              value={objectivesText}
+              onChange={(e) => setObjectivesText(e.target.value)}
+              className="text-xs"
+            />
+          </div>
+
           <div className="flex flex-col gap-2">
             <span className="text-xs font-medium text-foreground">Project badge color</span>
             <div className="flex gap-2">
@@ -435,7 +526,7 @@ export function ProjectModal({
           <div className="mt-6 pt-4 border-t border-destructive/20 flex flex-col gap-3">
             <div>
               <strong className="text-xs font-semibold text-destructive">Archive or delete project</strong>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Permanently remove {projectToEdit.name} and all its associated tasks and issues.
               </p>
             </div>

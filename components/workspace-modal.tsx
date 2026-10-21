@@ -288,7 +288,7 @@ export function WorkspaceModal({
                   value={slug}
                   onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                 />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   https://{slug || 'your-team'}.flowboard.app
                 </span>
               </div>
@@ -298,7 +298,7 @@ export function WorkspaceModal({
                   <label htmlFor="ws-create-desc" className="text-xs font-medium text-foreground">
                     Description
                   </label>
-                  <span className="text-[11px] text-muted-foreground">optional</span>
+                  <span className="text-xs text-muted-foreground">optional</span>
                 </div>
                 <Textarea
                   id="ws-create-desc"
@@ -424,7 +424,7 @@ export function WorkspaceModal({
                         <div className="flex items-center gap-2">
                           <Mail className="size-3.5 text-muted-foreground" />
                           <span className="font-medium">{inv.email}</span>
-                          <Badge variant="outline" className="text-[10px] capitalize">
+                          <Badge variant="outline" className="text-xs capitalize">
                             {inv.role}
                           </Badge>
                         </div>
@@ -487,7 +487,7 @@ export function WorkspaceModal({
               <div className="mt-6 pt-4 border-t border-destructive/20 flex flex-col gap-3">
                 <div>
                   <strong className="text-xs font-semibold text-destructive">Archive or delete workspace</strong>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Permanently remove {currentWorkspace.name} and all associated projects.
                   </p>
                 </div>

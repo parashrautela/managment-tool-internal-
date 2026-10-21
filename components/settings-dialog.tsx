@@ -262,7 +262,7 @@ export function SettingsDialog({
                   <label htmlFor="user-bio" className="text-xs font-medium text-foreground">
                     Bio
                   </label>
-                  <span className="text-[11px] text-muted-foreground">optional</span>
+                  <span className="text-xs text-muted-foreground">optional</span>
                 </div>
                 <Textarea
                   id="user-bio"
@@ -356,7 +356,7 @@ export function SettingsDialog({
               <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-card shadow-xs mt-2">
                 <div>
                   <strong className="text-xs font-semibold text-foreground">Progressive Web App (PWA)</strong>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Install Flowboard to your home screen or dock for desktop offline access.
                   </p>
                 </div>
@@ -405,7 +405,7 @@ export function SettingsDialog({
                 >
                   <div className="flex flex-col gap-0.5">
                     <strong className="text-xs font-medium text-foreground">{item.title}</strong>
-                    <span className="text-[11px] text-muted-foreground">{item.desc}</span>
+                    <span className="text-xs text-muted-foreground">{item.desc}</span>
                   </div>
                   <Switch
                     checked={notifications[item.key]}
@@ -424,10 +424,10 @@ export function SettingsDialog({
                     <Laptop className="size-5 text-primary" />
                     <div>
                       <strong className="text-xs font-semibold">Mac OS · Chrome Browser</strong>
-                      <p className="text-[10px] text-muted-foreground">Active now · IP: 192.168.1.1 (Current device)</p>
+                      <p className="text-xs text-muted-foreground">Active now · IP: 192.168.1.1 (Current device)</p>
                     </div>
                   </div>
-                  <Badge variant="default" className="text-[10px]">Current</Badge>
+                  <Badge variant="default" className="text-xs">Current</Badge>
                 </div>
 
                 <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-card">
@@ -435,7 +435,7 @@ export function SettingsDialog({
                     <Smartphone className="size-5 text-muted-foreground" />
                     <div>
                       <strong className="text-xs font-semibold">iOS · Flowboard Mobile PWA</strong>
-                      <p className="text-[10px] text-muted-foreground">Last active 2 days ago · Cupertino, CA</p>
+                      <p className="text-xs text-muted-foreground">Last active 2 days ago · Cupertino, CA</p>
                     </div>
                   </div>
                 </div>
@@ -443,7 +443,7 @@ export function SettingsDialog({
 
               <div className="flex flex-col gap-2 pt-2 border-t border-border">
                 <span className="text-xs font-semibold text-foreground">Password & Authentication</span>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   To change your password or configure multi-factor authentication, request a secure reset link.
                 </p>
                 <Button
@@ -463,7 +463,7 @@ export function SettingsDialog({
               <div className="mt-4 pt-4 border-t border-destructive/20 flex flex-col gap-3">
                 <div>
                   <strong className="text-xs font-semibold text-destructive">Deactivate Account</strong>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Temporarily deactivate your account and revoke active login tokens.
                   </p>
                 </div>
