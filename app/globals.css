@@ -1586,11 +1586,18 @@ h1 {
   margin-bottom: 10px;
   gap: 12px;
   transition: box-shadow 0.15s, border-color 0.15s;
+  cursor: pointer;
+  user-select: none;
 }
 
 .issue-card:hover {
   box-shadow: 0 4px 12px rgba(119, 96, 218, 0.08);
   border-color: #dcd3f5;
+}
+
+.issue-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .issue-card strong {

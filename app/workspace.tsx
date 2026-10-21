@@ -1991,12 +1991,20 @@ export default function WorkspaceApp() {
                             </div>
 
                             {colIssues.map(issue => (
-                              <button 
+                              <div 
                                 key={issue.id} 
+                                role="button"
+                                tabIndex={0}
                                 className="issue-card"
                                 draggable={canEdit(userRole)}
                                 onDragStart={e => e.dataTransfer.setData('text/plain', issue.id)}
                                 onClick={() => setActiveDrawerIssue(issue)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setActiveDrawerIssue(issue);
+                                  }
+                                }}
                               >
                                 <span className={`issue-label ${issue.label.toLowerCase()}`}>
                                   {issue.label}
@@ -2014,6 +2022,9 @@ export default function WorkspaceApp() {
                                       e.stopPropagation();
                                       setTaskChatIssue(issue);
                                     }}
+                                    onKeyDown={(e) => {
+                                      e.stopPropagation();
+                                    }}
                                     title="Open Task Group Chat (Client & Team)"
                                   >
                                     <MessageSquare size={12} />
@@ -2026,7 +2037,7 @@ export default function WorkspaceApp() {
                                     />
                                   )}
                                 </span>
-                              </button>
+                              </div>
                             ))}
 
                             {colIssues.length === 0 && (
