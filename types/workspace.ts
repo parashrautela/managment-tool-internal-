@@ -94,10 +94,13 @@ export type IssueComment = {
   authorName: string;
   authorEmail: string;
   authorRole?: string;
+  authorAvatar?: string;
   content: string;
   isInternal?: boolean; // If true: visible only to internal team/admins, hidden from clients
   isInternalOnly?: boolean;
   attachments?: TaskAttachment[];
+  replyToId?: string;
+  replyToSnippet?: string;
   createdAt: string;
 };
 

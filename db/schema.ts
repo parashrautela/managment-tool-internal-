@@ -83,3 +83,17 @@ export const notifications = pgTable('notifications', {
   read: integer('read').notNull().default(0),
   createdAt: text('created_at').notNull(),
 });
+
+export const issueComments = pgTable('issue_comments', {
+  id: text('id').primaryKey(),
+  issueId: text('issue_id').notNull().references(() => issues.id),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  authorName: text('author_name').notNull(),
+  authorEmail: text('author_email').notNull(),
+  authorRole: text('author_role').notNull(),
+  content: text('content').notNull(),
+  isInternalOnly: integer('is_internal_only').notNull().default(0),
+  replyToId: text('reply_to_id'),
+  createdAt: text('created_at').notNull(),
+});
+

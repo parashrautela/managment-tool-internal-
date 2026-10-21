@@ -82,6 +82,19 @@ CREATE TABLE "notifications" (
 	"created_at" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "issue_comments" (
+	"id" text PRIMARY KEY NOT NULL,
+	"issue_id" text NOT NULL,
+	"project_id" text NOT NULL,
+	"author_name" text NOT NULL,
+	"author_email" text NOT NULL,
+	"author_role" text NOT NULL,
+	"content" text NOT NULL,
+	"is_internal_only" integer DEFAULT 0 NOT NULL,
+	"reply_to_id" text,
+	"created_at" text NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "issues" ADD CONSTRAINT "issues_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "members" ADD CONSTRAINT "members_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;
@@ -91,6 +104,10 @@ ALTER TABLE "milestones" ADD CONSTRAINT "milestones_project_id_projects_id_fk" F
 ALTER TABLE "attachments" ADD CONSTRAINT "attachments_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "issue_comments" ADD CONSTRAINT "issue_comments_issue_id_issues_id_fk" FOREIGN KEY ("issue_id") REFERENCES "public"."issues"("id") ON DELETE no action ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "issue_comments" ADD CONSTRAINT "issue_comments_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;
 --> statement-breakpoint
 CREATE UNIQUE INDEX "issue_number" ON "issues" USING btree ("project_id","number");
 --> statement-breakpoint
@@ -105,5 +122,7 @@ ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.issue_comments ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON TABLE public.projects, public.members, public.issues, public.milestones, public.attachments, public.chat_messages, public.notifications FROM anon, authenticated;
+REVOKE ALL ON TABLE public.projects, public.members, public.issues, public.milestones, public.attachments, public.chat_messages, public.notifications, public.issue_comments FROM anon, authenticated;
+

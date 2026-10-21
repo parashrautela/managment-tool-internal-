@@ -19,7 +19,9 @@ import {
   ImageIcon, 
   FileText, 
   Check, 
-  Sparkles 
+  Sparkles,
+  MessageSquare,
+  ArrowUpRight
 } from 'lucide-react';
 import type { 
   Issue, 
@@ -76,6 +78,7 @@ interface IssueDrawerProps {
   isClientUser?: boolean;
   currentUserName?: string;
   currentUserEmail?: string;
+  onOpenTaskChat?: (issue: Issue) => void;
 }
 
 export function IssueDrawer({
@@ -90,6 +93,7 @@ export function IssueDrawer({
   isClientUser = false,
   currentUserName = 'Alex Morgan',
   currentUserEmail = 'alex.morgan@company.com',
+  onOpenTaskChat,
 }: IssueDrawerProps) {
   const [commentText, setCommentText] = useState('');
   const [isInternalComment, setIsInternalComment] = useState(false);
@@ -224,6 +228,18 @@ export function IssueDrawer({
             </div>
 
             <div className="flex items-center gap-2 mr-6">
+              {onOpenTaskChat && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => onOpenTaskChat(issue)}
+                  className="gap-1.5 h-7 text-xs border-primary/40 text-primary hover:bg-primary/10 font-medium"
+                >
+                  <MessageSquare className="size-3.5" /> Task Chat
+                </Button>
+              )}
+
               {canManage && (
                 <Button
                   variant="ghost"
@@ -551,11 +567,25 @@ export function IssueDrawer({
               )}
             </div>
 
-            {/* Comments Thread */}
+            {/* Comments & Group Chat Thread */}
             <div className="flex flex-col gap-3">
-              <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
-                Discussion & Activity ({visibleComments.length})
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <MessageSquare className="size-3.5 text-primary" />
+                  Client & Team Group Chat ({visibleComments.length})
+                </span>
+                {onOpenTaskChat && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => onOpenTaskChat(issue)}
+                    className="h-6 text-[11px] text-primary hover:underline gap-1 p-0"
+                  >
+                    Open Live Chat <ArrowUpRight className="size-3" />
+                  </Button>
+                )}
+              </div>
 
               <div className="flex flex-col gap-3">
                 {visibleComments.length === 0 ? (

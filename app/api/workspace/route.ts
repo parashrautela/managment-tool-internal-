@@ -1,6 +1,6 @@
 import { getUser } from '../../../lib/auth';
 import { getDb } from '../../../db';
-import { projects, members, issues, milestones, attachments, chatMessages, notifications } from '../../../db/schema';
+import { projects, members, issues, milestones, attachments, chatMessages, notifications, issueComments } from '../../../db/schema';
 import { and, eq, isNull, inArray, sql, or } from 'drizzle-orm';
 import { canManage, canEdit, canChangeMember, roles, statuses, priorities } from '../../../lib/permissions';
 
@@ -53,12 +53,33 @@ async function handle(req: Request) {
     const userAttachments = ids.length ? await db.select().from(attachments).where(inArray(attachments.projectId, ids)) : [];
     const userMessages = ids.length ? await db.select().from(chatMessages).where(inArray(chatMessages.projectId, ids)) : [];
     const userNotifs = await db.select().from(notifications).where(eq(notifications.recipientEmail, email));
+    const allComments = ids.length ? await db.select().from(issueComments).where(inArray(issueComments.projectId, ids)) : [];
+
+    const isClient = userMembers.some(m => m.role === 'client');
+    const enrichedIssues = userIssues.map(issue => {
+      const issueComms = allComments
+        .filter(c => c.issueId === issue.id && (!isClient || !c.isInternalOnly))
+        .map(c => ({
+          id: c.id,
+          issueId: c.issueId,
+          authorName: c.authorName,
+          authorEmail: c.authorEmail,
+          authorRole: c.authorRole,
+          content: c.content,
+          isInternalOnly: Boolean(c.isInternalOnly),
+          createdAt: c.createdAt,
+        }));
+      return {
+        ...issue,
+        comments: issueComms,
+      };
+    });
 
     return Response.json({
       user,
       projects: userProjects,
       members: userMembers,
-      issues: userIssues,
+      issues: enrichedIssues,
       milestones: userMilestones,
       attachments: userAttachments,
       chatMessages: userMessages,
@@ -98,6 +119,37 @@ async function handle(req: Request) {
       });
     });
     return Response.json({id});
+  }
+
+  if(b.action === 'addComment') {
+    const issueId = required(b.issueId, 80);
+    const content = required(b.content, 5000);
+    const [issue] = await db.select().from(issues).where(eq(issues.id, issueId));
+    if(!issue) throw new RequestError('Issue not found.', 404);
+
+    const [membership] = await db.select().from(members).where(and(eq(members.projectId, issue.projectId), or(eq(members.userId, user.userId), eq(members.email, email))));
+    if(!membership) throw new RequestError('You do not have access to this project.', 403);
+
+    const isInternalOnly = b.isInternalOnly === true ? 1 : 0;
+    if(membership.role === 'client' && isInternalOnly) {
+      throw new RequestError('Clients cannot create internal notes.', 403);
+    }
+
+    const commentId = crypto.randomUUID();
+    await db.insert(issueComments).values({
+      id: commentId,
+      issueId,
+      projectId: issue.projectId,
+      authorName: user.displayName,
+      authorEmail: email,
+      authorRole: membership.role,
+      content,
+      isInternalOnly,
+      replyToId: b.replyToId ? String(b.replyToId) : null,
+      createdAt: new Date().toISOString()
+    });
+
+    return Response.json({ status: 'comment_added', id: commentId });
   }
 
   const projectId = required(b.projectId, 80);

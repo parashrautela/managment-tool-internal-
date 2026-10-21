@@ -154,7 +154,34 @@ try {
   assert.equal(finalPmData.attachments.length, 1, 'Attachment should exist');
   assert.equal(finalPmData.chatMessages.length, 1, 'Chat message should exist');
 
-  console.log('Collaboration test suite: All 12 assertions passed successfully!');
+  // 12. Task Group Chat between Client and Team
+  const targetTask = finalPmData.issues[0];
+  assert(targetTask, 'Task should exist for group chat');
+
+  // Client posts in task group chat
+  const taskCommentRes = await call('client', {
+    action: 'addComment',
+    issueId: targetTask.id,
+    content: 'Hi Team, could you verify if the port 443 firewall rule is open for this task?',
+  });
+  assert.equal(taskCommentRes.status, 'comment_added', 'Task group chat message should be saved');
+
+  // Team responds in task group chat
+  await call('employee', {
+    action: 'addComment',
+    issueId: targetTask.id,
+    content: 'Verified! Port 443 is open and ingress controller is listening.',
+  });
+
+  // Verify client can see both task chat messages
+  const clientTaskData = await call('client', null);
+  const clientTask = clientTaskData.issues.find(i => i.id === targetTask.id);
+  assert(clientTask, 'Client should be able to view task');
+  assert.equal(clientTask.comments.length, 2, 'Client should see both task group chat messages');
+  assert.equal(clientTask.comments[0].authorEmail, actors.client.email, 'First message from client');
+  assert.equal(clientTask.comments[1].authorEmail, actors.employee.email, 'Second message from team member');
+
+  console.log('Collaboration test suite: All 15 assertions passed successfully!');
 } finally {
   await pg.close();
 }

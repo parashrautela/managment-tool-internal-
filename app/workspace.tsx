@@ -65,7 +65,8 @@ import type {
   ProjectMessage,
   AppNotification,
   PersonaUser,
-  IssueLabel
+  IssueLabel,
+  IssueComment
 } from '../types/workspace';
 import { 
   initialWorkspaces, 
@@ -97,6 +98,7 @@ import { ProjectFiles } from '../components/project-files';
 import { ProjectChat } from '../components/project-chat';
 import { ClientFeedbackModal } from '../components/client-feedback-modal';
 import { MediaViewerModal } from '../components/media-viewer-modal';
+import { TaskGroupChatModal } from '../components/task-group-chat-modal';
 import {
   Dialog,
   DialogContent,
@@ -219,6 +221,7 @@ export default function WorkspaceApp() {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [feedbackTask, setFeedbackTask] = useState<Issue | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<TaskAttachment | null>(null);
+  const [taskChatIssue, setTaskChatIssue] = useState<Issue | null>(null);
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -642,6 +645,78 @@ export default function WorkspaceApp() {
     setNotice(`Feedback logged as ${currentProject.key}-${newNum}! Your team has been notified.`);
     setIsFeedbackModalOpen(false);
     setFeedbackTask(null);
+  }
+
+  // Task Group Chat Message Handler (Between Client & Team)
+  function handleSendTaskChatMessage(
+    issueId: string, 
+    content: string, 
+    attachedFiles?: TaskAttachment[], 
+    replyToId?: string, 
+    replyToSnippet?: string, 
+    isInternal?: boolean
+  ) {
+    const targetIssue = allIssues.find(i => i.id === issueId);
+    if (!targetIssue) return;
+
+    const newComment: IssueComment = {
+      id: 'c-' + Date.now(),
+      issueId,
+      authorName: currentPersona.displayName,
+      authorEmail: currentPersona.email,
+      authorRole: currentPersona.role,
+      authorAvatar: currentPersona.displayName.slice(0, 2).toUpperCase(),
+      content,
+      isInternal: isInternal || false,
+      isInternalOnly: isInternal || false,
+      attachments: attachedFiles,
+      replyToId,
+      replyToSnippet,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedComments = [...(targetIssue.comments || []), newComment];
+    const updatedIssue: Issue = {
+      ...targetIssue,
+      comments: updatedComments,
+      attachments: attachedFiles?.length 
+        ? [...(targetIssue.attachments || []), ...attachedFiles] 
+        : targetIssue.attachments,
+    };
+
+    const nextIssues = allIssues.map(i => i.id === issueId ? updatedIssue : i);
+    setAllIssues(nextIssues);
+    persist('flowboard_issues', nextIssues);
+    setTaskChatIssue(updatedIssue);
+    if (activeDrawerIssue?.id === issueId) {
+      setActiveDrawerIssue(updatedIssue);
+    }
+
+    if (attachedFiles?.length) {
+      const nextAtts = [...attachedFiles, ...attachments];
+      setAttachments(nextAtts);
+      persist('flowboard_attachments', nextAtts);
+    }
+
+    // In-app notification
+    const isClient = currentPersona.role === 'client';
+    const recipient = isClient ? 'alex.pm@company.com' : (currentProject?.clientEmail || 'client@acme.com');
+    const newNotif: AppNotification = {
+      id: 'notif-' + Date.now(),
+      recipientEmail: recipient,
+      title: `Task Chat: ${currentProject?.key || 'TASK'}-${targetIssue.number}`,
+      message: `${currentPersona.displayName}: "${content.slice(0, 70)}${content.length > 70 ? '...' : ''}"`,
+      type: isClient ? 'client_feedback' : 'comment',
+      projectId: targetIssue.projectId,
+      issueId: targetIssue.id,
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+    const nextNotifs = [newNotif, ...notifications];
+    setNotifications(nextNotifs);
+    persist('flowboard_notifications', nextNotifs);
+
+    addActivity('posted in task chat for', `${currentProject?.key || 'TASK'}-${targetIssue.number}`);
   }
 
   // Notifications Handlers
@@ -1125,6 +1200,7 @@ export default function WorkspaceApp() {
         isClientUser={currentPersona.role === 'client'}
         currentUserName={currentPersona.displayName}
         currentUserEmail={currentPersona.email}
+        onOpenTaskChat={issue => setTaskChatIssue(issue)}
       />
 
       {/* CLIENT FEEDBACK MODAL */}
@@ -1145,6 +1221,22 @@ export default function WorkspaceApp() {
       <MediaViewerModal
         attachment={previewAttachment}
         onClose={() => setPreviewAttachment(null)}
+      />
+
+      {/* DEDICATED TASK GROUP CHAT MODAL (Client & Team) */}
+      <TaskGroupChatModal
+        isOpen={Boolean(taskChatIssue)}
+        onClose={() => setTaskChatIssue(null)}
+        issue={taskChatIssue}
+        project={currentProject}
+        members={currentProjectMembers}
+        currentPersona={currentPersona}
+        onSendMessage={handleSendTaskChatMessage}
+        onPreviewAttachment={att => setPreviewAttachment(att)}
+        onOpenTaskDetails={issue => {
+          setTaskChatIssue(null);
+          setActiveDrawerIssue(issue);
+        }}
       />
 
       {/* FIRST TIME ONBOARDING WIZARD */}
@@ -1915,6 +2007,18 @@ export default function WorkspaceApp() {
                                   <span className={`priority ${issue.priority.toLowerCase()}`}>
                                     <Flag size={12} /> {issue.priority}
                                   </span>
+                                  <button
+                                    type="button"
+                                    className={`task-chat-btn ${(issue.comments?.length || 0) > 0 ? 'has-messages' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setTaskChatIssue(issue);
+                                    }}
+                                    title="Open Task Group Chat (Client & Team)"
+                                  >
+                                    <MessageSquare size={12} />
+                                    <span>{(issue.comments?.length || 0) > 0 ? issue.comments?.length : 'Chat'}</span>
+                                  </button>
                                   {issue.assignee && (
                                     <Avatar 
                                       name={currentProjectMembers.find(m => m.id === issue.assignee)?.name || 'Unassigned'} 
@@ -1940,6 +2044,7 @@ export default function WorkspaceApp() {
                       projects={workspaceProjects} 
                       members={allMembers} 
                       onOpen={issue => setActiveDrawerIssue(issue)} 
+                      onOpenTaskChat={issue => setTaskChatIssue(issue)}
                     />
                   )}
                 </>
@@ -2205,6 +2310,7 @@ export default function WorkspaceApp() {
                   navigateToProject(issue.projectId, 'Board');
                   setActiveDrawerIssue(issue);
                 }}
+                onOpenTaskChat={issue => setTaskChatIssue(issue)}
               />
 
               {!visibleIssues.length && (
@@ -2553,11 +2659,13 @@ function IssueTable({
   projects,
   members,
   onOpen,
+  onOpenTaskChat,
 }: {
   items: Issue[];
   projects: Project[];
   members: Member[];
   onOpen: (i: Issue) => void;
+  onOpenTaskChat?: (i: Issue) => void;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
@@ -2590,7 +2698,7 @@ function IssueTable({
                     <Badge variant="outline" className="text-xs font-mono shrink-0">
                       {project?.key || 'ISSUE'}-{i.number}
                     </Badge>
-                    <span className="text-sm font-medium text-foreground truncate max-w-[340px]">
+                    <span className="text-sm font-medium text-foreground truncate max-w-[320px]">
                       {i.title}
                     </span>
                     <Badge variant="secondary" className="text-xs shrink-0">
@@ -2606,6 +2714,18 @@ function IssueTable({
                         Client visible
                       </Badge>
                     )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenTaskChat && onOpenTaskChat(i);
+                      }}
+                      className={`task-chat-btn ${(i.comments?.length || 0) > 0 ? 'has-messages' : ''} shrink-0`}
+                      title="Open Task Group Chat (Client & Team)"
+                    >
+                      <MessageSquare size={12} />
+                      <span>{(i.comments?.length || 0) > 0 ? i.comments?.length : 'Chat'}</span>
+                    </button>
                   </div>
                 </TableCell>
                 <TableCell className="py-3">
