@@ -199,21 +199,32 @@ export function SettingsDialog({
                 </Avatar>
                 <div className="flex flex-col gap-1.5 flex-1">
                   <span className="text-xs font-semibold text-foreground">Avatar color accent</span>
-                  <div className="flex gap-2">
-                    {['purple', 'blue', 'green', 'orange'].map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        className={cn(
-                          'size-6 rounded-full transition-transform flex items-center justify-center',
-                          c,
-                          avatarColor === c && 'ring-2 ring-primary ring-offset-2'
-                        )}
-                        onClick={() => setAvatarColor(c)}
-                      >
-                        {avatarColor === c && <Check className="size-3.5 text-white" />}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-2.5">
+                    {(['purple', 'blue', 'green', 'orange'] as const).map((c) => {
+                      const hexColors: Record<typeof c, string> = {
+                        purple: '#7760da',
+                        blue: '#3b82f6',
+                        green: '#10b981',
+                        orange: '#f59e0b',
+                      };
+                      const isSelected = avatarColor === c;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          aria-label={`Select ${c} avatar color`}
+                          title={c.charAt(0).toUpperCase() + c.slice(1)}
+                          style={{ backgroundColor: hexColors[c] }}
+                          className={cn(
+                            'size-6 rounded-full transition-all flex items-center justify-center cursor-pointer shadow-xs',
+                            isSelected ? 'ring-2 ring-primary ring-offset-2 scale-110 shadow-sm' : 'opacity-90 hover:opacity-100 hover:scale-105'
+                          )}
+                          onClick={() => setAvatarColor(c)}
+                        >
+                          {isSelected && <Check className="size-3.5 text-white stroke-[2.5]" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

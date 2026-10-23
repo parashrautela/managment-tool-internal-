@@ -45,9 +45,12 @@ import {
   Download,
   Maximize2,
   FileText,
-  AlertCircle
+  AlertCircle,
+  Building2,
+  Copy,
+  Mail
 } from 'lucide-react';
-import { canManage, canEdit, canChangeMember, isClient, canViewInternal, statuses, priorities } from '../lib/permissions';
+import { canManage, canEdit, canChangeMember, isClient, canViewInternal, canCreateProject, statuses, priorities } from '../lib/permissions';
 import type { 
   Workspace, 
   Project, 
@@ -139,10 +142,10 @@ type ApiData = {
 
 const roleText: Record<string, string> = {
   owner: 'Full control of this project, workspace settings, and its people.',
-  admin: 'Manage issues, configure project settings, and invite team members.',
-  member: 'Create, update, and collaborate on issues and boards.',
-  guest: 'View explicitly shared project issues with read-only permissions.',
-  viewer: 'View explicitly shared project issues with read-only permissions.'
+  admin: 'Manage tasks, configure project settings, and invite team members.',
+  member: 'Create, update, and collaborate on tasks and boards.',
+  guest: 'View explicitly shared project tasks with read-only permissions.',
+  viewer: 'View explicitly shared project tasks with read-only permissions.'
 };
 
 function initials(name: string) {
@@ -225,13 +228,19 @@ export default function WorkspaceApp() {
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'admin' | 'member' | 'viewer'>('member');
+  const [inviteRole, setInviteRole] = useState<'admin' | 'project_manager' | 'employee' | 'member' | 'viewer' | 'client'>('client');
+  const [isInviteLinkCopied, setIsInviteLinkCopied] = useState(false);
+  const [copiedProjectId, setCopiedProjectId] = useState<string | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
 
+  // Join project via invite link modal & state
+  const [isJoinProjectModalOpen, setIsJoinProjectModalOpen] = useState(false);
+  const [joinLinkInput, setJoinLinkInput] = useState('');
+  const [joinError, setJoinError] = useState<string | null>(null);
 
-  // Hydrate local storage once on mount
+  // Hydrate local storage once on mount & handle invite links
   useEffect(() => {
     try {
       const savedWs = localStorage.getItem('flowboard_workspaces');
@@ -258,6 +267,38 @@ export default function WorkspaceApp() {
       if (savedMessages) setMessages(JSON.parse(savedMessages));
       const savedNotifications = localStorage.getItem('flowboard_notifications');
       if (savedNotifications) setNotifications(JSON.parse(savedNotifications));
+
+      // Handle invite links (?invite=<projectId>&role=client&email=...)
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const inviteProj = params.get('invite') || params.get('projectId');
+        const inviteRoleParam = params.get('role');
+        const inviteEmailParam = params.get('email');
+        if (inviteProj) {
+          if (inviteRoleParam === 'client') {
+            const clientPersona = initialPersonas.find(p => p.role === 'client') || {
+              id: 'user-client',
+              displayName: inviteEmailParam ? inviteEmailParam.split('@')[0] : 'Emma Watson',
+              email: inviteEmailParam || 'emma.watson@acmeclient.com',
+              role: 'client' as const,
+              title: 'VP of Digital Experience @ Acme Corp',
+              avatarColor: 'orange' as const,
+              assignedProjectIds: [inviteProj],
+            };
+            const updatedAssigned = Array.from(new Set([...(clientPersona.assignedProjectIds || []), inviteProj]));
+            const resolvedPersona = { ...clientPersona, assignedProjectIds: updatedAssigned };
+            setCurrentPersona(resolvedPersona);
+            persist('flowboard_persona', resolvedPersona);
+            setNotice('Welcome! You have joined as a Client via invite link.');
+          } else {
+            setNotice('Joined project via invite link.');
+          }
+          if (inviteProj !== 'workspace') {
+            setSelectedProjectId(inviteProj);
+          }
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }
     } catch {
       // LocalStorage unavailable, use defaults
     }
@@ -330,12 +371,16 @@ export default function WorkspaceApp() {
   const workspaceProjects = useMemo(() => {
     let list = allProjects.filter(p => !p.workspaceId || p.workspaceId === currentWorkspace.id);
     if (currentPersona.role === 'client') {
+      const clientEmail = (currentPersona.email || '').toLowerCase();
       // Client strictly only accesses their assigned projects
       list = list.filter(p => 
-        (p.clientEmail && p.clientEmail.toLowerCase() === currentPersona.email.toLowerCase()) ||
-        allMembers.some(m => m.projectId === p.id && (m.email?.toLowerCase() === currentPersona.email.toLowerCase() || m.role === 'client')) ||
-        p.id === 'proj-acme' ||
-        (p.clientCompany && p.clientCompany.toLowerCase() === currentPersona.company?.toLowerCase())
+        (p.clientEmail && p.clientEmail.toLowerCase() === clientEmail) ||
+        (p.clientContactEmail && p.clientContactEmail.toLowerCase() === clientEmail) ||
+        (currentPersona.assignedProjectIds && currentPersona.assignedProjectIds.includes(p.id)) ||
+        allMembers.some(m => m.projectId === p.id && (
+          (m.email && m.email.toLowerCase() === clientEmail) ||
+          (m.userId && m.userId === currentPersona.id)
+        ))
       );
     }
     return list;
@@ -454,8 +499,9 @@ export default function WorkspaceApp() {
 
     setNotice(`Switched persona to ${persona.displayName} · ${persona.role.replace('_', ' ').toUpperCase()}`);
 
-    // If switching to client, auto-route to their project workspace
+    // If switching to client, auto-route to their project workspace and reset filter
     if (persona.role === 'client') {
+      setFilter('all');
       const clientProj = allProjects.find(p => 
         (p.clientEmail && p.clientEmail.toLowerCase() === persona.email.toLowerCase()) ||
         persona.assignedProjectIds.includes(p.id) ||
@@ -804,10 +850,15 @@ export default function WorkspaceApp() {
     startDate?: string;
     dueDate?: string;
     health?: 'On track' | 'At risk' | 'Delayed';
+    clientCompany?: string;
+    clientContactName?: string;
+    clientContactEmail?: string;
+    projectManagerName?: string;
+    objectives?: string[];
     templateId?: string;
     action?: 'create' | 'update' | 'archive' | 'delete';
   }) {
-    if (data.id) {
+    if (data.id && allProjects.some(p => p.id === data.id)) {
       // Update existing
       const updated = allProjects.map(p => {
         if (p.id === data.id) {
@@ -822,6 +873,12 @@ export default function WorkspaceApp() {
             startDate: data.startDate,
             dueDate: data.dueDate,
             health: data.health || p.health,
+            clientCompany: data.clientCompany !== undefined ? data.clientCompany : p.clientCompany,
+            clientContactName: data.clientContactName !== undefined ? data.clientContactName : p.clientContactName,
+            clientContactEmail: data.clientContactEmail !== undefined ? data.clientContactEmail : p.clientContactEmail,
+            clientEmail: data.clientContactEmail !== undefined ? data.clientContactEmail : p.clientEmail,
+            projectManagerName: data.projectManagerName !== undefined ? data.projectManagerName : p.projectManagerName,
+            objectives: data.objectives || p.objectives,
           };
         }
         return p;
@@ -832,7 +889,11 @@ export default function WorkspaceApp() {
       setNotice(`Project ${data.name} updated.`);
     } else {
       // Create new
-      const newProjectId = 'proj-' + Date.now();
+      if (!canCreateProject(userRole)) {
+        setNotice('Clients cannot create projects. Access is granted strictly via invite link or email invitation.');
+        return;
+      }
+      const newProjectId = (data.id && !allProjects.some(p => p.id === data.id)) ? data.id : ('proj-' + Date.now());
       const newProject: Project = {
         id: newProjectId,
         workspaceId: currentWorkspace.id,
@@ -846,6 +907,12 @@ export default function WorkspaceApp() {
         startDate: data.startDate || new Date().toISOString().split('T')[0],
         dueDate: data.dueDate,
         health: data.health || 'On track',
+        clientCompany: data.clientCompany,
+        clientContactName: data.clientContactName,
+        clientContactEmail: data.clientContactEmail,
+        clientEmail: data.clientContactEmail,
+        projectManagerName: data.projectManagerName,
+        objectives: data.objectives,
         createdAt: new Date().toISOString().split('T')[0],
       };
 
@@ -884,7 +951,27 @@ export default function WorkspaceApp() {
       }
 
       const updatedProjects = [newProject, ...allProjects];
-      const updatedMembers = [...allMembers, newMember];
+      let updatedMembers = [...allMembers, newMember];
+
+      if (data.clientContactEmail) {
+        const clientEmailClean = data.clientContactEmail.trim().toLowerCase();
+        if (!updatedMembers.some(m => m.projectId === newProjectId && m.email.toLowerCase() === clientEmailClean)) {
+          const clientMember: Member = {
+            id: 'm-' + Date.now() + '-client',
+            projectId: newProjectId,
+            workspaceId: currentWorkspace.id,
+            userId: null,
+            email: clientEmailClean,
+            name: data.clientContactName || data.clientCompany || 'Client Partner',
+            role: 'client',
+            title: 'Client Stakeholder',
+            status: 'active',
+            joinedAt: new Date().toISOString().split('T')[0],
+          };
+          updatedMembers.push(clientMember);
+        }
+      }
+
       const updatedIssues = [...allIssues, ...starterIssues];
 
       setAllProjects(updatedProjects);
@@ -896,7 +983,7 @@ export default function WorkspaceApp() {
       persist('flowboard_issues', updatedIssues);
 
       addActivity('created project', newProject.name);
-      setNotice(`Project ${newProject.name} is ready!`);
+      setNotice(`Project ${newProject.name} is ready! Client invite link is active.`);
       navigateToProject(newProjectId, 'Board');
     }
   }
@@ -968,12 +1055,141 @@ export default function WorkspaceApp() {
     }
   }
 
+  const currentInviteLink = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://flowboard.io';
+    const projId = currentProject ? currentProject.id : (workspaceProjects[0]?.id || 'workspace');
+    const params = new URLSearchParams({
+      invite: projId,
+      role: inviteRole,
+    });
+    if (inviteEmail.trim()) {
+      params.set('email', inviteEmail.trim().toLowerCase());
+    }
+    return `${origin}/?${params.toString()}`;
+  }, [currentProject, workspaceProjects, inviteRole, inviteEmail]);
+
+  function handleCopyInviteLink() {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(currentInviteLink);
+      setIsInviteLinkCopied(true);
+      setNotice(inviteRole === 'client' ? 'Client invite link copied to clipboard!' : 'Invite link copied to clipboard!');
+      setTimeout(() => setIsInviteLinkCopied(false), 2500);
+    }
+  }
+
+  function handleEmailInviteLink() {
+    const targetEmail = inviteEmail.trim();
+    const projName = currentProject ? currentProject.name : currentWorkspace.name;
+    const subject = encodeURIComponent(`Invitation to collaborate on ${projName}`);
+    const body = encodeURIComponent(
+      `Hi,\n\nYou have been invited to join ${projName} as a ${inviteRole === 'client' ? 'Client' : inviteRole}.\n\nAccess your deliverables and project dashboard directly with this link:\n${currentInviteLink}\n\nBest regards,\n${userProfile.displayName}`
+    );
+    window.open(`mailto:${targetEmail}?subject=${subject}&body=${body}`, '_blank');
+  }
+
+  function handleCopyProjectClientLink(project: Project) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://flowboard.io';
+    const params = new URLSearchParams({
+      invite: project.id,
+      role: 'client',
+    });
+    if (project.clientContactEmail) {
+      params.set('email', project.clientContactEmail.trim().toLowerCase());
+    }
+    const link = `${origin}/?${params.toString()}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(link);
+      setCopiedProjectId(project.id);
+      setNotice(`Client invite link for "${project.name}" copied to clipboard! Send this link to your client to grant instant access.`);
+      setTimeout(() => setCopiedProjectId(null), 2500);
+    }
+  }
+
+  function handleOpenClientInviteModal(project: Project) {
+    setSelectedProjectId(project.id);
+    setInviteRole('client');
+    setInviteEmail(project.clientContactEmail || '');
+    setIsInviteModalOpen(true);
+  }
+
+  function handleJoinProjectWithLink(input: string): boolean {
+    const raw = input.trim();
+    if (!raw) {
+      setJoinError('Please enter an invite link or project code.');
+      return false;
+    }
+
+    const matchedProject = resolveProjectFromInvite(raw, allProjects);
+    if (!matchedProject) {
+      setJoinError('Project not found. Please double check your invite link or code.');
+      return false;
+    }
+
+    // Ensure client persona is updated to have access to this project
+    const updatedAssigned = Array.from(new Set([...(currentPersona.assignedProjectIds || []), matchedProject.id]));
+    const updatedPersona: PersonaUser = {
+      ...currentPersona,
+      assignedProjectIds: updatedAssigned,
+    };
+    setCurrentPersona(updatedPersona);
+    persist('flowboard_persona', updatedPersona);
+
+    // Ensure member record exists for this persona in this project
+    const clientEmail = (currentPersona.email || 'emma.watson@acmeclient.com').toLowerCase();
+    const existingMember = allMembers.find(
+      m => m.projectId === matchedProject.id && (m.email?.toLowerCase() === clientEmail || m.userId === currentPersona.id)
+    );
+
+    if (!existingMember) {
+      const newMember: Member = {
+        id: `m-${Date.now()}`,
+        workspaceId: matchedProject.workspaceId,
+        projectId: matchedProject.id,
+        userId: currentPersona.id,
+        email: clientEmail,
+        name: currentPersona.displayName,
+        role: 'client',
+        title: currentPersona.title || 'Client Stakeholder',
+        avatarColor: currentPersona.avatarColor || 'orange',
+        status: 'active',
+        joinedAt: new Date().toISOString().split('T')[0],
+      };
+      const updatedMembers = [...allMembers, newMember];
+      setAllMembers(updatedMembers);
+      persist('flowboard_members', updatedMembers);
+    }
+
+    // Attempt backend join if connected
+    fetch('/api/workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'joinProject', projectId: matchedProject.id, role: 'client' }),
+    }).catch(() => {});
+
+    // If project is in a different workspace than current, switch to that workspace
+    if (matchedProject.workspaceId && matchedProject.workspaceId !== currentWsId) {
+      setCurrentWsId(matchedProject.workspaceId);
+      persist('flowboard_current_ws', matchedProject.workspaceId);
+    }
+
+    // Navigate to project
+    navigateToProject(matchedProject.id, 'Board');
+    setJoinLinkInput('');
+    setJoinError(null);
+    setIsJoinProjectModalOpen(false);
+    setNotice(`Joined "${matchedProject.name}" successfully! Welcome to your project portal.`);
+    return true;
+  }
+
   function handleInviteSubmit(e: FormEvent) {
     e.preventDefault();
     const email = inviteEmail.trim().toLowerCase();
     const role = inviteRole;
 
-    if (!email) return;
+    if (!email) {
+      handleCopyInviteLink();
+      return;
+    }
 
     const newMember: Member = {
       id: 'm-' + Date.now(),
@@ -1006,8 +1222,11 @@ export default function WorkspaceApp() {
     persist('flowboard_members', updatedMembers);
     persist('flowboard_invitations', updatedInvs);
 
-    addActivity('invited teammate', email);
-    setNotice(`Invitation granted to ${email}.`);
+    addActivity(role === 'client' ? 'invited client via email' : 'invited teammate', email);
+    setNotice(role === 'client'
+      ? `Client invitation granted to ${email}. They can access via email or the invite link.`
+      : `Invitation granted to ${email}.`
+    );
     setInviteEmail('');
     setIsInviteModalOpen(false);
   }
@@ -1119,12 +1338,13 @@ export default function WorkspaceApp() {
 
   // Filtered views calculation
   const visibleProjects = useMemo(() => {
+    const isClientUser = currentPersona.role === 'client' || isClient(userRole);
     return workspaceProjects.filter(p => {
       const matchQuery = (p.name + ' ' + p.description + ' ' + p.key).toLowerCase().includes(query.toLowerCase());
-      const matchFilter = filter === 'all' || (filter === 'owned' ? p.ownerId === 'user-current' : p.ownerId !== 'user-current');
+      const matchFilter = filter === 'all' || isClientUser || (filter === 'owned' ? p.ownerId === 'user-current' : p.ownerId !== 'user-current');
       return matchQuery && matchFilter;
     });
-  }, [workspaceProjects, query, filter]);
+  }, [workspaceProjects, query, filter, currentPersona.role, userRole]);
 
   const visibleIssues = useMemo(() => {
     const pool = currentProject 
@@ -1167,6 +1387,10 @@ export default function WorkspaceApp() {
         onSelectMember={() => navigateToPage('people')}
         onAction={act => {
           if (act === 'createProject') {
+            if (!canCreateProject(userRole)) {
+              setNotice('Clients cannot create projects. Access is granted strictly via invite link or email invitation.');
+              return;
+            }
             setProjectToEdit(null);
             setIsProjectModalOpen(true);
           } else if (act === 'createIssue') {
@@ -1178,13 +1402,22 @@ export default function WorkspaceApp() {
               setIsQuickIssueModalOpen(true);
             }
           } else if (act === 'invite') {
+            if (!canManage(userRole)) {
+              setNotice('Only project leads and managers can invite collaborators.');
+              return;
+            }
             setIsInviteModalOpen(true);
+          } else if (act === 'joinProject') {
+            setJoinError(null);
+            setIsJoinProjectModalOpen(true);
           } else if (act === 'settings') {
             setIsSettingsOpen(true);
           } else if (act === 'onboarding') {
             setIsOnboardingOpen(true);
           }
         }}
+        canCreateProject={canCreateProject(userRole)}
+        canManage={canManage(userRole)}
       />
 
       {/* CONTEXTUAL ISSUE DRAWER */}
@@ -1278,6 +1511,7 @@ export default function WorkspaceApp() {
         workspaceId={currentWorkspace.id}
         onSaveProject={handleSaveProject}
         onDeleteProject={handleDeleteProject}
+        canCreate={canCreateProject(userRole)}
       />
 
       {/* PERSONAL PROFILE & PREFERENCES DIALOG */}
@@ -1294,14 +1528,24 @@ export default function WorkspaceApp() {
 
       {/* SIDEBAR NAVIGATION */}
       <aside className={`sidebar ${sidebar ? 'show' : ''}`}>
-        <a 
-          className="brand" 
-          href="/" 
-          onClick={e => { e.preventDefault(); navigateToPage('projects'); }}
-        >
-          <span className="brand-mark"><span /><span /><span /></span>
-          flowboard<span className="brand-dot">.</span>
-        </a>
+        <div className="sidebar-brand-row">
+          <a 
+            className="brand" 
+            href="/" 
+            onClick={e => { e.preventDefault(); navigateToPage('projects'); setSidebar(false); }}
+          >
+            <span className="brand-mark"><span /><span /><span /></span>
+            flowboard<span className="brand-dot">.</span>
+          </a>
+          <button 
+            type="button"
+            className="sidebar-mobile-close"
+            onClick={() => setSidebar(false)}
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
         {/* Workspace Switcher Button */}
         <button 
@@ -1334,7 +1578,7 @@ export default function WorkspaceApp() {
             onClick={() => navigateToPage('my-issues')}
           >
             <CheckCheck size={19} />
-            My issues
+            My tasks
           </button>
           <button 
             className={!selectedProjectId && page === 'people' ? 'active' : ''} 
@@ -1348,12 +1592,14 @@ export default function WorkspaceApp() {
         {/* Project Navigation Section */}
         <div className="nav-caption project-caption">
           YOUR PROJECTS
-          <button 
-            aria-label="Create project" 
-            onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
-          >
-            <Plus size={15} />
-          </button>
+          {canCreateProject(userRole) && (
+            <button 
+              aria-label="Create project" 
+              onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
+            >
+              <Plus size={15} />
+            </button>
+          )}
         </div>
         <nav className="project-nav">
           {workspaceProjects.map(p => (
@@ -1374,12 +1620,18 @@ export default function WorkspaceApp() {
             <span className="callout-icon"><Sparkles size={17} /></span>
             <strong>Great work is a team sport.</strong>
             <p>Bring your people and roadmaps<br />together in one place.</p>
-            <button onClick={() => {
-              if (currentProject && canManage(userRole)) setIsInviteModalOpen(true);
-              else { setProjectToEdit(null); setIsProjectModalOpen(true); }
-            }}>
-              Collaborate <ArrowUpRight size={14} />
-            </button>
+            {canCreateProject(userRole) ? (
+              <button onClick={() => {
+                if (currentProject && canManage(userRole)) setIsInviteModalOpen(true);
+                else { setProjectToEdit(null); setIsProjectModalOpen(true); }
+              }}>
+                Collaborate <ArrowUpRight size={14} />
+              </button>
+            ) : (
+              <span className="text-[11px] text-muted-foreground mt-2 block">
+                Client access is granted via invite link or email.
+              </span>
+            )}
           </div>
 
           <InstallButton variant="sidebar" />
@@ -1427,24 +1679,25 @@ export default function WorkspaceApp() {
             <button 
               className="topbar-ws-pill" 
               onClick={() => setWsModalMode('switch')}
+              title={`Switch workspace (current: ${currentWorkspace.name})`}
             >
-              <span>{currentWorkspace.name}</span>
-              <ChevronDown size={12} />
+              <span className="truncate">{currentWorkspace.name}</span>
+              <ChevronDown size={12} className="shrink-0" />
             </button>
 
-            <ChevronRight size={14} />
+            <ChevronRight size={14} className="crumb-sep shrink-0" />
 
-            <strong>
+            <strong className="crumb-strong truncate">
               {currentProject 
                 ? currentProject.name 
                 : page === 'my-issues' 
-                ? 'My issues' 
+                ? 'My tasks' 
                 : page === 'people' 
                 ? 'People & access' 
                 : 'Projects'}
             </strong>
 
-            {currentProject && <span className="breadcrumb-key">{currentProject.key}</span>}
+            {currentProject && <span className="breadcrumb-key shrink-0">{currentProject.key}</span>}
           </div>
 
           {/* Centered Wide Global Search Bar */}
@@ -1488,6 +1741,7 @@ export default function WorkspaceApp() {
 
             <button 
               aria-label="Workspace Settings" 
+              className="top-settings-btn"
               onClick={() => setWsModalMode('settings')}
             >
               <Settings size={18} />
@@ -1507,6 +1761,10 @@ export default function WorkspaceApp() {
           <ClientPortalBanner
             currentPersona={currentPersona}
             onSwitchToAdmin={() => handleSelectPersona(initialPersonas[0])}
+            onEnterInviteLink={() => {
+              setJoinError(null);
+              setIsJoinProjectModalOpen(true);
+            }}
           />
         )}
 
@@ -1529,12 +1787,14 @@ export default function WorkspaceApp() {
                   <h1>Good work starts here<span className="heading-dot">.</span></h1>
                   <p>A central home for {currentWorkspace.name}’s roadmaps, sprints, and deliverables.</p>
                 </div>
-                <Button 
-                  onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
-                  className="gap-2 shadow-xs"
-                >
-                  <Plus data-icon="inline-start" /> Create project
-                </Button>
+                {canCreateProject(userRole) && (
+                  <Button 
+                    onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
+                    className="gap-2 shadow-xs"
+                  >
+                    <Plus data-icon="inline-start" /> Create project
+                  </Button>
+                )}
               </div>
 
               {/* High-level Workspace Metrics */}
@@ -1584,11 +1844,17 @@ export default function WorkspaceApp() {
 
               <div className="toolbar">
                 <div className="project-filters">
-                  {[
-                    ['all', 'All projects'],
-                    ['owned', 'Owned by me'],
-                    ['shared', 'Shared with me'],
-                  ].map(([v, l]) => (
+                  {(currentPersona.role === 'client' || isClient(userRole)
+                    ? [
+                        ['all', 'All projects'],
+                        ['shared', 'Shared with me'],
+                      ]
+                    : [
+                        ['all', 'All projects'],
+                        ['owned', 'Owned by me'],
+                        ['shared', 'Shared with me'],
+                      ]
+                  ).map(([v, l]) => (
                     <button 
                       key={v} 
                       className={filter === v ? 'current' : ''} 
@@ -1600,6 +1866,20 @@ export default function WorkspaceApp() {
                 </div>
 
                 <div className="toolbar-right">
+                  {currentPersona.role === 'client' && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        setJoinError(null);
+                        setIsJoinProjectModalOpen(true);
+                      }}
+                      className="gap-1.5 h-9 text-xs font-medium border-primary/30 text-primary hover:bg-primary/5 shrink-0"
+                    >
+                      <Link2 className="size-3.5" /> Join with link
+                    </Button>
+                  )}
+
                   <div className="search-field">
                     <Search size={16} />
                     <input 
@@ -1677,6 +1957,22 @@ export default function WorkspaceApp() {
                               <button onClick={() => { navigateToProject(p.id, 'People'); setMenu(null); }}>
                                 People & access <Users size={14} />
                               </button>
+                              {canManage(userRole) && (
+                                <>
+                                  <button onClick={() => { 
+                                    handleCopyProjectClientLink(p); 
+                                    setMenu(null); 
+                                  }}>
+                                    Copy client link <Link2 size={14} />
+                                  </button>
+                                  <button onClick={() => { 
+                                    handleOpenClientInviteModal(p); 
+                                    setMenu(null); 
+                                  }}>
+                                    Invite client via email <Mail size={14} />
+                                  </button>
+                                </>
+                              )}
                               <button onClick={() => { 
                                 setProjectToEdit(p); 
                                 setIsProjectModalOpen(true); 
@@ -1700,7 +1996,7 @@ export default function WorkspaceApp() {
 
                       <div className="card-tags">
                         <span>{p.key}</span>
-                        <span><Layers size={12} /> {tasks.length} issues</span>
+                        <span><Layers size={12} /> {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}</span>
                         <span style={{ textTransform: 'capitalize' }}>{p.priority || 'Medium'}</span>
                       </div>
 
@@ -1724,35 +2020,143 @@ export default function WorkspaceApp() {
                             {team.length} {team.length === 1 ? 'member' : 'members'}
                           </span>
                         </div>
-                        <button 
-                          className="open-project" 
-                          aria-label={`Open ${p.name}`} 
-                          onClick={() => navigateToProject(p.id, 'Board')}
-                        >
-                          <ArrowUpRight size={17} />
-                        </button>
+                        <div className="card-bottom-actions">
+                          {canManage(userRole) && (
+                            <button 
+                              type="button"
+                              className={`invite-client-btn ${copiedProjectId === p.id ? 'copied' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopyProjectClientLink(p);
+                              }}
+                              title={`Copy client invite link for ${p.name}`}
+                            >
+                              {copiedProjectId === p.id ? (
+                                <>
+                                  <Check size={12} className="copy-check-icon" />
+                                  <span>Link copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Link2 size={12} />
+                                  <span>Invite client</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                          <button 
+                            className="open-project" 
+                            aria-label={`Open ${p.name}`} 
+                            onClick={() => navigateToProject(p.id, 'Board')}
+                          >
+                            <ArrowUpRight size={17} />
+                          </button>
+                        </div>
                       </div>
                     </article>
                   );
                 })}
 
                 {/* Add New Project Card */}
-                <button 
-                  className="new-project-card" 
-                  onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
-                >
-                  <span><Plus size={23} /></span>
-                  <strong>Make room for your next big idea</strong>
-                  <p>Blank slate or kick off with a ready-to-use template.</p>
-                  <small>Create a project <ArrowRight size={14} /></small>
-                </button>
+                {canCreateProject(userRole) && (
+                  <button 
+                    className="new-project-card" 
+                    onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
+                  >
+                    <span><Plus size={23} /></span>
+                    <strong>Make room for your next big idea</strong>
+                    <p>Blank slate or kick off with a ready-to-use template.</p>
+                    <small>Create a project <ArrowRight size={14} /></small>
+                  </button>
+                )}
               </div>
 
               {visibleProjects.length === 0 && (
                 <div className="empty">
-                  <Search size={25} />
-                  <h3>No projects found</h3>
-                  <p>Try refining your search or create a new project in this workspace.</p>
+                  {currentPersona.role === 'client' ? (
+                    <div className="client-empty-container max-w-lg mx-auto py-2">
+                      <div className="size-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto mb-3 shadow-xs">
+                        <Link2 size={26} />
+                      </div>
+                      <h3 className="text-lg font-semibold text-foreground">No client projects assigned yet</h3>
+                      <p className="text-muted-foreground text-xs mt-1 max-w-md mx-auto">
+                        Clients cannot create projects. Access is granted strictly when invited by the project manager via an invite link or email invitation.
+                      </p>
+
+                      <div className="mt-6 p-5 rounded-xl border border-border/80 bg-card shadow-sm text-left">
+                        <div className="flex items-center gap-2 mb-1.5 text-foreground font-medium text-sm">
+                          <Sparkles className="size-4 text-primary" />
+                          <span>Have an invite link or project code?</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-3">
+                          Paste your invite link or code below to immediately join and access your project deliverables:
+                        </p>
+
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            handleJoinProjectWithLink(joinLinkInput);
+                          }}
+                          className="space-y-3"
+                        >
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <div className="relative flex-1">
+                              <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                              <Input
+                                type="text"
+                                value={joinLinkInput}
+                                onChange={(e) => {
+                                  setJoinLinkInput(e.target.value);
+                                  if (joinError) setJoinError(null);
+                                }}
+                                placeholder="Paste invite link (e.g. ?invite=sample-1 or WEB)..."
+                                className="pl-9 h-10 text-sm bg-background border-border"
+                              />
+                            </div>
+                            <Button 
+                              type="submit" 
+                              className="h-10 px-5 gap-1.5 font-medium shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
+                            >
+                              Join project <ArrowRight className="size-4" />
+                            </Button>
+                          </div>
+
+                          {joinError && (
+                            <div className="flex items-center gap-1.5 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
+                              <AlertCircle className="size-4 shrink-0" />
+                              <span>{joinError}</span>
+                            </div>
+                          )}
+
+                          <div className="pt-2.5 border-t border-border/60 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                            <span>Ask your project manager if you don&apos;t have a link.</span>
+                            {allProjects.length > 0 && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-medium text-foreground/80">Quick demo:</span>
+                                {allProjects.slice(0, 2).map(p => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => handleJoinProjectWithLink(p.id)}
+                                    className="px-2 py-0.5 rounded bg-muted hover:bg-primary/10 hover:text-primary transition-colors border border-border text-[11px] font-mono cursor-pointer"
+                                    title={`Join ${p.name}`}
+                                  >
+                                    +{p.key}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </form>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <Search size={25} />
+                      <h3>No projects found</h3>
+                      <p>Try refining your search or create a new project in this workspace.</p>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1809,9 +2213,29 @@ export default function WorkspaceApp() {
                   ) : (
                     <>
                       {canManage(userRole) && (
-                        <Button variant="outline" onClick={() => setIsInviteModalOpen(true)}>
-                          <Users data-icon="inline-start" /> Add people
-                        </Button>
+                        <>
+                          <Button 
+                            variant="outline" 
+                            onClick={() => handleCopyProjectClientLink(currentProject)}
+                            className="gap-1.5"
+                            title="Copy client invite link to send directly to your client"
+                          >
+                            {copiedProjectId === currentProject.id ? (
+                              <>
+                                <Check className="size-4 text-emerald-500" />
+                                <span>Link copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Link2 className="size-4" />
+                                <span>Client invite link</span>
+                              </>
+                            )}
+                          </Button>
+                          <Button variant="outline" onClick={() => setIsInviteModalOpen(true)}>
+                            <Users data-icon="inline-start" /> Add people
+                          </Button>
+                        </>
                       )}
                       <Button 
                         onClick={() => {
@@ -1820,7 +2244,7 @@ export default function WorkspaceApp() {
                         }}
                         disabled={!canEdit(userRole)}
                       >
-                        <Plus data-icon="inline-start" /> Create issue
+                        <Plus data-icon="inline-start" /> Create task
                       </Button>
                     </>
                   )}
@@ -1885,8 +2309,8 @@ export default function WorkspaceApp() {
                     <div className="search-field">
                       <Search size={16} />
                       <input 
-                        aria-label="Search issues" 
-                        placeholder="Search issues..." 
+                        aria-label="Search tasks" 
+                        placeholder="Search tasks..." 
                         value={query} 
                         onChange={e => setQuery(e.target.value)}
                       />
@@ -1910,7 +2334,7 @@ export default function WorkspaceApp() {
                       {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
 
-                    <span className="issue-total">{visibleIssues.length} issues</span>
+                    <span className="issue-total">{visibleIssues.length} {visibleIssues.length === 1 ? 'task' : 'tasks'}</span>
 
                     <div className="avatar-group">
                       {currentProjectMembers.slice(0, 4).map((m, i) => (
@@ -1979,7 +2403,7 @@ export default function WorkspaceApp() {
                               <span>{colIssues.length}</span>
                               {canEdit(userRole) && (
                                 <button 
-                                  aria-label={`Add issue to ${status}`} 
+                                  aria-label={`Add task to ${status}`} 
                                   onClick={() => {
                                     setQuickIssueInitialStatus(status);
                                     setIsQuickIssueModalOpen(true);
@@ -2297,7 +2721,7 @@ export default function WorkspaceApp() {
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">YOUR FOCUS, FOUND.</div>
-                  <h1>My issues<span className="heading-dot">.</span></h1>
+                  <h1>My tasks<span className="heading-dot">.</span></h1>
                   <p>Everything assigned to you, across all active projects.</p>
                 </div>
               </div>
@@ -2306,7 +2730,7 @@ export default function WorkspaceApp() {
                 <div className="search-field">
                   <Search size={16} />
                   <input 
-                    placeholder="Search your assigned issues..." 
+                    placeholder="Search your assigned tasks..." 
                     value={query} 
                     onChange={e => setQuery(e.target.value)}
                   />
@@ -2328,7 +2752,7 @@ export default function WorkspaceApp() {
                 <div className="empty">
                   <CheckCheck size={32} />
                   <h3>All caught up</h3>
-                  <p>No open issues are currently assigned to your account.</p>
+                  <p>No open tasks are currently assigned to your account.</p>
                 </div>
               )}
             </>
@@ -2343,9 +2767,11 @@ export default function WorkspaceApp() {
                   <h1>People & access<span className="heading-dot">.</span></h1>
                   <p>Manage team membership, roles, and project-level scopes.</p>
                 </div>
-                <Button onClick={() => setIsInviteModalOpen(true)}>
-                  <Plus data-icon="inline-start" /> Invite teammate
-                </Button>
+                {canManage(userRole) && (
+                  <Button onClick={() => setIsInviteModalOpen(true)}>
+                    <Plus data-icon="inline-start" /> Invite teammate
+                  </Button>
+                )}
               </div>
 
               <div className="project-access-grid">
@@ -2383,7 +2809,7 @@ export default function WorkspaceApp() {
 
       {/* FLOATING TOAST NOTIFICATION */}
       {notice && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-2" role="status">
+        <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 z-50 max-w-md animate-in fade-in slide-in-from-bottom-2" role="status">
           <Alert className="border-primary/30 bg-card shadow-lg flex items-center gap-3 pr-2 py-3">
             <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
             <AlertDescription className="text-xs font-medium text-foreground flex-1">
@@ -2417,7 +2843,7 @@ export default function WorkspaceApp() {
                 <Layers className="size-5" />
               </span>
               <div>
-                <DialogTitle className="text-lg font-bold">Create an issue</DialogTitle>
+                <DialogTitle className="text-lg font-bold">Create a task</DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
                   Add a new deliverable to {currentProject?.name} ({currentProject?.key}).
                 </DialogDescription>
@@ -2428,7 +2854,7 @@ export default function WorkspaceApp() {
           <form onSubmit={handleQuickIssueSubmit} className="flex flex-col gap-4 mt-2">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="qi-title" className="text-xs font-medium text-foreground">
-                Issue title
+                Task title
               </label>
               <Input
                 id="qi-title"
@@ -2569,30 +2995,30 @@ export default function WorkspaceApp() {
                 Cancel
               </Button>
               <Button type="submit">
-                Create issue <ArrowRight data-icon="inline-end" />
+                Create task <ArrowRight data-icon="inline-end" />
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* INVITE TEAMMATE DIALOG */}
+      {/* INVITE TEAMMATE & CLIENT DIALOG */}
       <Dialog
         open={isInviteModalOpen}
         onOpenChange={(open) => {
           if (!open) setIsInviteModalOpen(false);
         }}
       >
-        <DialogContent className="sm:max-w-[480px] p-6 max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[500px] p-6 max-h-[90vh] overflow-y-auto">
           <DialogHeader className="gap-2">
             <div className="flex items-center gap-3">
               <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <Users className="size-5" />
               </span>
               <div>
-                <DialogTitle className="text-lg font-bold">Invite Teammates</DialogTitle>
+                <DialogTitle className="text-lg font-bold">Invite Collaborators & Clients</DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Add collaborators to {currentProject ? currentProject.name : currentWorkspace.name}.
+                  Invite teammates or provide clients with direct access to {currentProject ? currentProject.name : currentWorkspace.name}.
                 </DialogDescription>
               </div>
             </div>
@@ -2601,14 +3027,13 @@ export default function WorkspaceApp() {
           <form onSubmit={handleInviteSubmit} className="flex flex-col gap-4 mt-2">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="inv-email" className="text-xs font-medium text-foreground">
-                Teammate Email Address
+                Email Address
               </label>
               <Input
                 id="inv-email"
                 type="email"
-                required
                 autoFocus
-                placeholder="colleague@company.com"
+                placeholder="client@company.com or colleague@company.com"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
               />
@@ -2627,29 +3052,185 @@ export default function WorkspaceApp() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="admin">Admin — Manage issues & team access</SelectItem>
-                    <SelectItem value="member">Member — Create and edit issues</SelectItem>
-                    <SelectItem value="viewer">Viewer — Read-only access</SelectItem>
+                    <SelectItem value="client">Client (External) — View deliverables, feedback & chat</SelectItem>
+                    <SelectItem value="employee">Team Member — Update tasks, upload deliverables & chat</SelectItem>
+                    <SelectItem value="project_manager">Project Manager — Manage tasks, milestones & clients</SelectItem>
+                    <SelectItem value="admin">Admin — Full project management & team controls</SelectItem>
+                    <SelectItem value="viewer">Viewer — Read-only observation</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border bg-muted/40 text-xs text-muted-foreground leading-relaxed">
-              <Link2 className="size-4 text-primary shrink-0 mt-0.5" />
-              <p>Teammates will receive access immediately. Share this workspace URL so they can sign in.</p>
+            {inviteRole === 'client' && (
+              <div className="flex items-start gap-2.5 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
+                <ShieldCheck className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Client Portal Notice:</strong> Clients cannot create projects. They can only join and access this project via your email invitation or the direct invite link below.
+                </div>
+              </div>
+            )}
+
+            {/* Direct Shareable Invite Link Card */}
+            <div className="flex flex-col gap-2 p-3 rounded-lg border border-border bg-card">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Link2 className="size-3.5 text-primary" /> Shareable Invite Link
+                </span>
+                <span className="text-[11px] text-muted-foreground capitalize">
+                  {inviteRole === 'client' ? 'Client portal link' : `${inviteRole.replace('_', ' ')} link`}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={currentInviteLink}
+                  className="h-8 text-xs font-mono bg-muted/50 select-all"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleCopyInviteLink}
+                  className="gap-1.5 shrink-0 h-8 text-xs"
+                >
+                  {isInviteLinkCopied ? (
+                    <>
+                      <Check className="size-3.5 text-emerald-500" /> Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="size-3.5" /> Copy link
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Clients and teammates opening this link will immediately join this project with the selected role.
+              </p>
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0 mt-2">
+            <DialogFooter className="gap-2 sm:gap-2 mt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsInviteModalOpen(false)}
+                size="sm"
+                onClick={handleEmailInviteLink}
+                className="gap-1.5 text-xs order-2 sm:order-1"
+                title="Open in your default mail application with prefilled message"
+              >
+                <Mail className="size-3.5" /> Email via Mail app
+              </Button>
+
+              <div className="flex items-center gap-2 order-1 sm:order-2 ml-auto">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsInviteModalOpen(false)}
+                >
+                  Close
+                </Button>
+                <Button type="submit" size="sm" className="gap-1.5">
+                  <Send className="size-3.5" /> Send Invitation
+                </Button>
+              </div>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* JOIN PROJECT VIA INVITE LINK MODAL */}
+      <Dialog open={isJoinProjectModalOpen} onOpenChange={setIsJoinProjectModalOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <div className="size-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-2">
+              <Link2 className="size-5" />
+            </div>
+            <DialogTitle className="text-lg font-semibold">Join Project with Invite Link</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Enter the invitation link or project code provided by your project manager to view project milestones, deliverables, and tasks.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleJoinProjectWithLink(joinLinkInput);
+            }}
+            className="space-y-4 pt-1"
+          >
+            <div className="space-y-2">
+              <label htmlFor="join-link-input" className="text-xs font-medium text-foreground">
+                Invite Link or Project Code
+              </label>
+              <div className="relative">
+                <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  id="join-link-input"
+                  type="text"
+                  value={joinLinkInput}
+                  onChange={(e) => {
+                    setJoinLinkInput(e.target.value);
+                    if (joinError) setJoinError(null);
+                  }}
+                  placeholder="e.g. ?invite=sample-1 or sample-1 or WEB"
+                  className="pl-9 h-10 text-sm"
+                  autoFocus
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Accepts full URLs, query strings, project IDs, or project keys (e.g. WEB, APP).
+              </p>
+            </div>
+
+            {joinError && (
+              <div className="flex items-center gap-1.5 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{joinError}</span>
+              </div>
+            )}
+
+            {allProjects.length > 0 && (
+              <div className="p-3 bg-muted/40 rounded-lg border border-border/60 text-xs">
+                <span className="font-medium text-muted-foreground block mb-1.5">Available workspace projects for quick testing:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {allProjects.slice(0, 3).map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setJoinLinkInput(p.id);
+                        if (joinError) setJoinError(null);
+                      }}
+                      className="px-2.5 py-1 rounded bg-background hover:bg-primary/10 hover:text-primary transition-colors border border-border text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <span className={`size-2 rounded-full project-dot ${p.color}`} />
+                      <span className="font-medium">{p.name}</span>
+                      <span className="text-[10px] text-muted-foreground">({p.key})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsJoinProjectModalOpen(false);
+                  setJoinError(null);
+                }}
               >
                 Cancel
               </Button>
-              <Button type="submit">
-                Grant access <ArrowRight data-icon="inline-end" />
+              <Button
+                type="submit"
+                className="gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                Join project <ArrowRight className="size-4" />
               </Button>
             </DialogFooter>
           </form>
@@ -2657,6 +3238,63 @@ export default function WorkspaceApp() {
       </Dialog>
     </div>
   );
+}
+
+function resolveProjectFromInvite(input: string, projectsList: Project[]): Project | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  // 1. Try URL parsing (full URL or relative query)
+  try {
+    let urlToParse = trimmed;
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      if (trimmed.startsWith('/') || trimmed.startsWith('?')) {
+        urlToParse = `https://dummy.domain${trimmed.startsWith('/') ? '' : '/'}${trimmed}`;
+      } else if (trimmed.includes('?')) {
+        urlToParse = `https://dummy.domain/${trimmed}`;
+      }
+    }
+    
+    if (urlToParse.startsWith('http://') || urlToParse.startsWith('https://')) {
+      const parsedUrl = new URL(urlToParse);
+      const inviteId = parsedUrl.searchParams.get('invite') || 
+                       parsedUrl.searchParams.get('projectId') || 
+                       parsedUrl.searchParams.get('project');
+      if (inviteId) {
+        const found = projectsList.find(p => p.id.toLowerCase() === inviteId.toLowerCase() || p.key.toLowerCase() === inviteId.toLowerCase());
+        if (found) return found;
+      }
+      const segments = parsedUrl.pathname.split('/').filter(Boolean);
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment) {
+        const found = projectsList.find(p => p.id.toLowerCase() === lastSegment.toLowerCase() || p.key.toLowerCase() === lastSegment.toLowerCase());
+        if (found) return found;
+      }
+    }
+  } catch {
+    // Continue to fallback checks
+  }
+
+  // 2. Direct query param fallback (e.g. invite=sample-1)
+  const queryMatch = trimmed.match(/(?:invite|projectId|project)=([a-zA-Z0-9_-]+)/i);
+  if (queryMatch && queryMatch[1]) {
+    const found = projectsList.find(p => p.id.toLowerCase() === queryMatch[1].toLowerCase() || p.key.toLowerCase() === queryMatch[1].toLowerCase());
+    if (found) return found;
+  }
+
+  // 3. Exact or case-insensitive match on ID
+  const byId = projectsList.find(p => p.id.toLowerCase() === trimmed.toLowerCase());
+  if (byId) return byId;
+
+  // 4. Exact or case-insensitive match on Key
+  const byKey = projectsList.find(p => p.key.toLowerCase() === trimmed.toLowerCase());
+  if (byKey) return byKey;
+
+  // 5. Case-insensitive match on Name
+  const byName = projectsList.find(p => p.name.toLowerCase() === trimmed.toLowerCase());
+  if (byName) return byName;
+
+  return null;
 }
 
 function isOverdue(dueDate?: string, status?: string): boolean {
@@ -2680,10 +3318,10 @@ function IssueTable({
 }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
-      <Table>
+      <Table className="min-w-[580px]">
         <TableHeader>
           <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border">
-            <TableHead className="w-[42%] text-xs font-semibold text-muted-foreground py-3">Issue</TableHead>
+            <TableHead className="w-[42%] text-xs font-semibold text-muted-foreground py-3">Task</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground py-3">Status</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground py-3">Priority</TableHead>
             <TableHead className="text-xs font-semibold text-muted-foreground py-3">Due Date</TableHead>

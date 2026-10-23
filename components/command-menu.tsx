@@ -8,7 +8,8 @@ import {
   Sparkles, 
   Building2, 
   ArrowRight,
-  User
+  User,
+  Link2
 } from 'lucide-react';
 import type { Workspace, Project, Issue, Member } from '../types/workspace';
 import {
@@ -35,7 +36,9 @@ interface CommandMenuProps {
   onSelectIssue: (issue: Issue) => void;
   members: Member[];
   onSelectMember: (member: Member) => void;
-  onAction: (action: 'createProject' | 'createIssue' | 'invite' | 'settings' | 'onboarding') => void;
+  onAction: (action: 'createProject' | 'createIssue' | 'invite' | 'settings' | 'onboarding' | 'joinProject') => void;
+  canCreateProject?: boolean;
+  canManage?: boolean;
 }
 
 export function CommandMenu({
@@ -51,6 +54,8 @@ export function CommandMenu({
   members,
   onSelectMember,
   onAction,
+  canCreateProject = true,
+  canManage = true,
 }: CommandMenuProps) {
   return (
     <CommandDialog
@@ -75,32 +80,48 @@ export function CommandMenu({
             }}
           >
             <Plus className="text-primary" />
-            <span className="flex-1">Create new task or issue</span>
+            <span className="flex-1">Create new task</span>
             <CommandShortcut>C</CommandShortcut>
           </CommandItem>
 
-          <CommandItem
-            value="create project new"
-            onSelect={() => {
-              onAction('createProject');
-              onClose();
-            }}
-          >
-            <FolderKanban className="text-blue-500" />
-            <span className="flex-1">Create new project</span>
-            <CommandShortcut>P</CommandShortcut>
-          </CommandItem>
+          {canCreateProject && (
+            <CommandItem
+              value="create project new"
+              onSelect={() => {
+                onAction('createProject');
+                onClose();
+              }}
+            >
+              <FolderKanban className="text-blue-500" />
+              <span className="flex-1">Create new project</span>
+              <CommandShortcut>P</CommandShortcut>
+            </CommandItem>
+          )}
+
+          {canManage && (
+            <CommandItem
+              value="invite teammate client member people"
+              onSelect={() => {
+                onAction('invite');
+                onClose();
+              }}
+            >
+              <Users className="text-emerald-500" />
+              <span className="flex-1">Invite teammate or client</span>
+              <CommandShortcut>I</CommandShortcut>
+            </CommandItem>
+          )}
 
           <CommandItem
-            value="invite teammate member people"
+            value="join project enter invite link code access client"
             onSelect={() => {
-              onAction('invite');
+              onAction('joinProject');
               onClose();
             }}
           >
-            <Users className="text-emerald-500" />
-            <span className="flex-1">Invite teammate</span>
-            <CommandShortcut>I</CommandShortcut>
+            <Link2 className="text-primary" />
+            <span className="flex-1">Join project with invite link</span>
+            <CommandShortcut>J</CommandShortcut>
           </CommandItem>
 
           <CommandItem
@@ -154,9 +175,9 @@ export function CommandMenu({
 
         <CommandSeparator />
 
-        {/* Tasks & Issues */}
+        {/* Tasks */}
         {issues.length > 0 && (
-          <CommandGroup heading="Tasks & Issues">
+          <CommandGroup heading="Tasks">
             {issues.map((i) => {
               const parentProj = projects.find((p) => p.id === i.projectId);
               return (

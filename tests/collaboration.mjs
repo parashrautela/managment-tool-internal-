@@ -78,9 +78,17 @@ try {
   const clientData = await call('client', null);
   assert(clientData.projects.some(p => p.id === projId), 'Client should see assigned project');
 
+  // 3b. Verify Client CANNOT create projects (client invited only via email/link)
+  await call('client', { action: 'createProject', name: 'Forbidden Client Project', key: 'FCP', color: 'purple' }, 403);
+
   // 4. Verify Other Client CANNOT see this project (strict tenant/project isolation)
   const otherData = await call('otherClient', null);
   assert(!otherData.projects.some(p => p.id === projId), 'Unassigned client must NOT see project');
+
+  // 4b. Verify Client can join project with invite link action and view deliverables
+  await call('otherClient', { action: 'joinProject', projectId: projId, role: 'client' });
+  const otherDataAfterJoin = await call('otherClient', null);
+  assert(otherDataAfterJoin.projects.some(p => p.id === projId), 'Client must see project after joining via invite');
 
   // 5. Create Tasks with different statuses including Blocked
   await call('employee', {

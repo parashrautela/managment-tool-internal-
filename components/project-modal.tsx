@@ -8,7 +8,10 @@ import {
   Calendar, 
   Flag, 
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Link2,
+  Copy,
+  Mail
 } from 'lucide-react';
 import { projectTemplates } from '../lib/initial-data';
 import type { Project, PriorityLevel, ProjectStatus } from '../types/workspace';
@@ -61,6 +64,7 @@ interface ProjectModalProps {
     action?: 'create' | 'update' | 'archive' | 'delete';
   }) => Promise<void>;
   onDeleteProject?: (projectId: string) => Promise<void>;
+  canCreate?: boolean;
 }
 
 export function ProjectModal({
@@ -70,6 +74,7 @@ export function ProjectModal({
   workspaceId: _workspaceId,
   onSaveProject,
   onDeleteProject,
+  canCreate = true,
 }: ProjectModalProps) {
   const isEditing = Boolean(projectToEdit);
   const [tab, setTab] = useState<'scratch' | 'template'>('scratch');
@@ -94,6 +99,8 @@ export function ProjectModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [assignedId, setAssignedId] = useState('');
+  const [isCopied, setIsCopied] = useState(false);
 
   useEffect(() => {
     if (projectToEdit) {
@@ -108,11 +115,12 @@ export function ProjectModal({
       setHealth(projectToEdit.health || 'On track');
       setClientCompany(projectToEdit.clientCompany || '');
       setClientContactName(projectToEdit.clientContactName || '');
-      setClientContactEmail(projectToEdit.clientContactEmail || '');
+      setClientContactEmail(projectToEdit.clientContactEmail || projectToEdit.clientEmail || '');
       setProjectManagerName(projectToEdit.projectManagerName || 'Alex Morgan');
       setObjectivesText((projectToEdit.objectives || []).join('\n'));
       setTab('scratch');
       setConfirmDelete(false);
+      setAssignedId(projectToEdit.id);
     } else {
       setName('');
       setKey('');
@@ -131,9 +139,35 @@ export function ProjectModal({
       setSelectedTemplateId(null);
       setTab('scratch');
       setConfirmDelete(false);
+      setAssignedId('proj-' + Date.now());
     }
     setError('');
+    setIsCopied(false);
   }, [projectToEdit, isOpen]);
+
+  const targetProjectId = projectToEdit ? projectToEdit.id : assignedId;
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://flowboard.io';
+  const clientInviteLink = `${origin}/?invite=${targetProjectId || 'new-project'}&role=client${
+    clientContactEmail.trim() ? `&email=${encodeURIComponent(clientContactEmail.trim().toLowerCase())}` : ''
+  }`;
+
+  function handleCopyInviteLink() {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(clientInviteLink);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2500);
+    }
+  }
+
+  function handleEmailInviteLink() {
+    const targetEmail = clientContactEmail.trim();
+    const projName = name.trim() || 'our new project';
+    const subject = encodeURIComponent(`Invitation to collaborate on ${projName}`);
+    const body = encodeURIComponent(
+      `Hi ${clientContactName.trim() || ''},\n\nYou have been invited to collaborate on ${projName} as a Client.\n\nUse this direct link to view deliverables, timeline progress, and provide feedback:\n${clientInviteLink}\n\nBest regards,\n${projectManagerName || 'Project Lead'}`
+    );
+    window.open(`mailto:${targetEmail}?subject=${subject}&body=${body}`, '_blank');
+  }
 
   function handleSelectTemplate(tplId: string) {
     setSelectedTemplateId(tplId);
@@ -157,6 +191,11 @@ export function ProjectModal({
       return;
     }
 
+    if (!isEditing && !canCreate) {
+      setError('Clients cannot create projects. Access is granted strictly via invite link or email invitation.');
+      return;
+    }
+
     setBusy(true);
     setError('');
     try {
@@ -166,7 +205,7 @@ export function ProjectModal({
         .filter(Boolean);
 
       await onSaveProject({
-        id: projectToEdit?.id,
+        id: projectToEdit?.id || assignedId,
         name: name.trim(),
         key: key.trim().toUpperCase(),
         description: description.trim(),
@@ -204,6 +243,38 @@ export function ProjectModal({
     } finally {
       setBusy(false);
     }
+  }
+
+  if (!isEditing && !canCreate) {
+    return (
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="sm:max-w-[480px] p-6 max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="gap-2">
+            <div className="flex items-center gap-3">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+                <AlertCircle className="size-5" />
+              </span>
+              <div>
+                <DialogTitle className="text-lg font-bold">Project Creation Restricted</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Clients cannot create projects in Flowboard.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="p-3 my-2 rounded-lg border border-border bg-muted/40 text-xs text-muted-foreground leading-relaxed">
+            As a client, you can only access projects you have been invited to via email or direct invite link. Please contact your project manager or agency team to receive an invitation.
+          </div>
+
+          <DialogFooter className="mt-2">
+            <Button type="button" onClick={onClose}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
   }
 
   return (
@@ -467,6 +538,56 @@ export function ProjectModal({
                 className="h-8 text-xs bg-background"
               />
             </div>
+
+            {/* Shareable Client Direct Invite Link */}
+            <div className="p-3 rounded-lg border border-primary/20 bg-primary/5 flex flex-col gap-2 mt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Link2 className="size-3.5 text-primary" /> Client Direct Invite Link
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Instant client portal access
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={clientInviteLink}
+                  className="h-8 text-xs font-mono bg-background select-all"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleCopyInviteLink}
+                  className="gap-1.5 shrink-0 h-8 text-xs font-medium"
+                >
+                  {isCopied ? (
+                    <>
+                      <Check className="size-3.5 text-emerald-500" /> Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="size-3.5" /> Copy link
+                    </>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleEmailInviteLink}
+                  className="gap-1.5 shrink-0 h-8 text-xs"
+                  title="Open mail application with prefilled invitation message"
+                >
+                  <Mail className="size-3.5" /> Email
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Send this link to your client by email or message so they can join and access this project directly.
+              </p>
+            </div>
           </div>
 
           {/* Project Objectives */}
@@ -486,21 +607,32 @@ export function ProjectModal({
 
           <div className="flex flex-col gap-2">
             <span className="text-xs font-medium text-foreground">Project badge color</span>
-            <div className="flex gap-2">
-              {(['purple', 'blue', 'green', 'orange'] as const).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={cn(
-                    'size-7 rounded-full transition-transform flex items-center justify-center',
-                    c,
-                    color === c && 'ring-2 ring-primary ring-offset-2'
-                  )}
-                  onClick={() => setColor(c)}
-                >
-                  {color === c && <Check className="size-4 text-white" />}
-                </button>
-              ))}
+            <div className="flex items-center gap-2.5">
+              {(['purple', 'blue', 'green', 'orange'] as const).map((c) => {
+                const hexColors: Record<typeof c, string> = {
+                  purple: '#7760da',
+                  blue: '#3b82f6',
+                  green: '#10b981',
+                  orange: '#f59e0b',
+                };
+                const isSelected = color === c;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-label={`Select ${c} color`}
+                    title={c.charAt(0).toUpperCase() + c.slice(1)}
+                    style={{ backgroundColor: hexColors[c] }}
+                    className={cn(
+                      'size-7 rounded-full transition-all flex items-center justify-center cursor-pointer shadow-xs',
+                      isSelected ? 'ring-2 ring-primary ring-offset-2 scale-110 shadow-sm' : 'opacity-90 hover:opacity-100 hover:scale-105'
+                    )}
+                    onClick={() => setColor(c)}
+                  >
+                    {isSelected && <Check className="size-4 text-white stroke-[2.5]" />}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

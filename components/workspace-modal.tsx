@@ -311,21 +311,32 @@ export function WorkspaceModal({
 
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-medium text-foreground">Workspace theme color</span>
-                <div className="flex gap-2">
-                  {['purple', 'blue', 'green', 'orange'].map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={cn(
-                        'size-7 rounded-full transition-transform flex items-center justify-center',
-                        c,
-                        color === c && 'ring-2 ring-primary ring-offset-2'
-                      )}
-                      onClick={() => setColor(c)}
-                    >
-                      {color === c && <Check className="size-4 text-white" />}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2.5">
+                  {(['purple', 'blue', 'green', 'orange'] as const).map((c) => {
+                    const hexColors: Record<typeof c, string> = {
+                      purple: '#7760da',
+                      blue: '#3b82f6',
+                      green: '#10b981',
+                      orange: '#f59e0b',
+                    };
+                    const isSelected = color === c;
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={`Select ${c} color`}
+                        title={c.charAt(0).toUpperCase() + c.slice(1)}
+                        style={{ backgroundColor: hexColors[c] }}
+                        className={cn(
+                          'size-7 rounded-full transition-all flex items-center justify-center cursor-pointer shadow-xs',
+                          isSelected ? 'ring-2 ring-primary ring-offset-2 scale-110 shadow-sm' : 'opacity-90 hover:opacity-100 hover:scale-105'
+                        )}
+                        onClick={() => setColor(c)}
+                      >
+                        {isSelected && <Check className="size-4 text-white stroke-[2.5]" />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -393,21 +404,32 @@ export function WorkspaceModal({
 
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-medium text-foreground">Workspace color</span>
-                <div className="flex gap-2">
-                  {['purple', 'blue', 'green', 'orange'].map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={cn(
-                        'size-7 rounded-full transition-transform flex items-center justify-center',
-                        c,
-                        color === c && 'ring-2 ring-primary ring-offset-2'
-                      )}
-                      onClick={() => setColor(c)}
-                    >
-                      {color === c && <Check className="size-4 text-white" />}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2.5">
+                  {(['purple', 'blue', 'green', 'orange'] as const).map((c) => {
+                    const hexColors: Record<typeof c, string> = {
+                      purple: '#7760da',
+                      blue: '#3b82f6',
+                      green: '#10b981',
+                      orange: '#f59e0b',
+                    };
+                    const isSelected = color === c;
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={`Select ${c} color`}
+                        title={c.charAt(0).toUpperCase() + c.slice(1)}
+                        style={{ backgroundColor: hexColors[c] }}
+                        className={cn(
+                          'size-7 rounded-full transition-all flex items-center justify-center cursor-pointer shadow-xs',
+                          isSelected ? 'ring-2 ring-primary ring-offset-2 scale-110 shadow-sm' : 'opacity-90 hover:opacity-100 hover:scale-105'
+                        )}
+                        onClick={() => setColor(c)}
+                      >
+                        {isSelected && <Check className="size-4 text-white stroke-[2.5]" />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 

@@ -92,6 +92,11 @@ async function handle(req: Request) {
   const b = body as Record<string, unknown>;
 
   if(b.action === 'createProject') {
+    const mine = await db.select().from(members).where(eq(members.userId, user.userId));
+    const isClientOnly = mine.length > 0 && mine.every(m => m.role === 'client');
+    if (isClientOnly) {
+      throw new RequestError('Clients cannot create projects. Access is granted via invite link or email invitation.', 403);
+    }
     const name = required(b.name, 80);
     const key = required(b.key, 8).toUpperCase();
     if(!/^[A-Z][A-Z0-9]{1,7}$/.test(key)) {
@@ -150,6 +155,27 @@ async function handle(req: Request) {
     });
 
     return Response.json({ status: 'comment_added', id: commentId });
+  }
+
+  if (b.action === 'joinProject') {
+    const targetProjId = required(b.projectId, 80);
+    const [targetProj] = await db.select().from(projects).where(eq(projects.id, targetProjId));
+    if (!targetProj) throw new RequestError('Project not found.', 404);
+
+    const [existingMember] = await db.select().from(members).where(
+      and(eq(members.projectId, targetProjId), or(eq(members.userId, user.userId), eq(members.email, email)))
+    );
+    if (!existingMember) {
+      await db.insert(members).values({
+        id: crypto.randomUUID(),
+        projectId: targetProjId,
+        userId: user.userId,
+        email,
+        name: user.displayName,
+        role: (b.role && ['client', 'member', 'viewer'].includes(String(b.role))) ? (b.role as any) : 'client'
+      });
+    }
+    return Response.json({ status: 'joined', projectId: targetProjId });
   }
 
   const projectId = required(b.projectId, 80);
