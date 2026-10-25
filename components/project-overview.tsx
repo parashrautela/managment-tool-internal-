@@ -149,44 +149,44 @@ export function ProjectOverview({
 
           {/* Real Metrics Grid */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="flex flex-col p-3 rounded-lg border border-border bg-card">
-              <span className="text-xs text-muted-foreground">Completed</span>
-              <strong className="text-2xl font-bold text-emerald-600 mt-1">{completed}</strong>
-              <span className="text-xs text-muted-foreground">Delivered & verified</span>
+            <div className="flex flex-col p-3.5 rounded-xl border border-border/80 bg-card shadow-2xs hover:shadow-xs transition-shadow">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Completed</span>
+              <strong className="text-2xl font-bold tracking-tight text-emerald-600 mt-1">{completed}</strong>
+              <span className="text-xs text-muted-foreground mt-0.5">Delivered & verified</span>
             </div>
 
-            <div className="flex flex-col p-3 rounded-lg border border-border bg-card">
-              <span className="text-xs text-muted-foreground">In Flight</span>
-              <strong className="text-2xl font-bold text-primary mt-1">{inProgress + inReview}</strong>
-              <span className="text-xs text-muted-foreground">{inProgress} active · {inReview} review</span>
+            <div className="flex flex-col p-3.5 rounded-xl border border-border/80 bg-card shadow-2xs hover:shadow-xs transition-shadow">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">In Flight</span>
+              <strong className="text-2xl font-bold tracking-tight text-primary mt-1">{inProgress + inReview}</strong>
+              <span className="text-xs text-muted-foreground mt-0.5">{inProgress} active · {inReview} review</span>
             </div>
 
-            <div className={`flex flex-col p-3 rounded-lg border ${blocked > 0 ? 'border-amber-500/40 bg-amber-500/5' : 'border-border bg-card'}`}>
+            <div className={`flex flex-col p-3.5 rounded-xl border transition-shadow ${blocked > 0 ? 'border-amber-500/40 bg-amber-500/5' : 'border-border/80 bg-card shadow-2xs hover:shadow-xs'}`}>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Blocked</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Blocked</span>
                 {blocked > 0 && <AlertTriangle className="size-3.5 text-amber-500" />}
               </div>
-              <strong className={`text-2xl font-bold mt-1 ${blocked > 0 ? 'text-amber-600' : 'text-foreground'}`}>
+              <strong className={`text-2xl font-bold tracking-tight mt-1 ${blocked > 0 ? 'text-amber-600' : 'text-foreground'}`}>
                 {blocked}
               </strong>
-              <span className="text-xs text-muted-foreground">Requires unblocking</span>
+              <span className="text-xs text-muted-foreground mt-0.5">Requires unblocking</span>
             </div>
 
-            <div className={`flex flex-col p-3 rounded-lg border ${overdue > 0 ? 'border-destructive/40 bg-destructive/5' : 'border-border bg-card'}`}>
+            <div className={`flex flex-col p-3.5 rounded-xl border transition-shadow ${overdue > 0 ? 'border-destructive/40 bg-destructive/5' : 'border-border/80 bg-card shadow-2xs hover:shadow-xs'}`}>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Overdue</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Overdue</span>
                 {overdue > 0 && <Clock className="size-3.5 text-destructive" />}
               </div>
-              <strong className={`text-2xl font-bold mt-1 ${overdue > 0 ? 'text-destructive' : 'text-foreground'}`}>
+              <strong className={`text-2xl font-bold tracking-tight mt-1 ${overdue > 0 ? 'text-destructive' : 'text-foreground'}`}>
                 {overdue}
               </strong>
-              <span className="text-xs text-muted-foreground">Past due date</span>
+              <span className="text-xs text-muted-foreground mt-0.5">Past due date</span>
             </div>
 
-            <div className="flex flex-col p-3 rounded-lg border border-border bg-card">
-              <span className="text-xs text-muted-foreground">Backlog</span>
-              <strong className="text-2xl font-bold text-foreground mt-1">{backlog}</strong>
-              <span className="text-xs text-muted-foreground">Scheduled queue</span>
+            <div className="flex flex-col p-3.5 rounded-xl border border-border/80 bg-card shadow-2xs hover:shadow-xs transition-shadow">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Backlog</span>
+              <strong className="text-2xl font-bold tracking-tight text-foreground mt-1">{backlog}</strong>
+              <span className="text-xs text-muted-foreground mt-0.5">Scheduled queue</span>
             </div>
           </div>
         </CardContent>
@@ -197,7 +197,7 @@ export function ProjectOverview({
         {/* Left Column (2 spans): Active Tasks & Objectives */}
         <div className="lg:col-span-2 flex flex-col gap-6">
           {/* Active Tasks Card */}
-          <Card className="border-border shadow-xs">
+          <Card className="border-border/80 shadow-xs">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
                 <CardTitle className="text-base font-semibold">Active Deliverables</CardTitle>
@@ -214,27 +214,27 @@ export function ProjectOverview({
                 <button
                   key={issue.id}
                   type="button"
-                  className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-accent/40 transition-colors text-left"
+                  className="flex items-center justify-between p-3.5 rounded-xl border border-border/80 bg-card hover:bg-accent/40 active:scale-[0.99] transition-all text-left"
                   onClick={() => onOpenIssue(issue)}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <Badge variant="outline" className="text-xs shrink-0">
+                    <Badge variant="outline" className="text-xs shrink-0 font-medium">
                       {issue.label}
                     </Badge>
                     <span className="text-sm font-medium text-foreground truncate">
                       {issue.title}
                     </span>
                     {issue.status === 'Blocked' && (
-                      <Badge variant="destructive" className="text-[10px] px-1 py-0">
+                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0 font-semibold">
                         Blocked
                       </Badge>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="secondary" className="text-xs">
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <Badge variant="secondary" className="text-xs font-semibold">
                       {issue.status}
                     </Badge>
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground flex items-center gap-1 font-medium">
                       <Flag className="size-3" /> {issue.priority}
                     </span>
                     <ArrowUpRight className="size-3.5 text-muted-foreground" />

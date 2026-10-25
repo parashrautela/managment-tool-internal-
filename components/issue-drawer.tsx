@@ -8,7 +8,6 @@ import {
   Trash2, 
   Send, 
   Clock, 
-  ShieldCheck, 
   Lock, 
   CheckSquare, 
   Plus, 
@@ -102,9 +101,11 @@ export function IssueDrawer({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [selectedPreviewAttachment, setSelectedPreviewAttachment] = useState<TaskAttachment | null>(null);
+  const [commentAttachments, setCommentAttachments] = useState<TaskAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const commentImageInputRef = useRef<HTMLInputElement>(null);
 
-  if (!issue) return null;
+  if (!issue || isClientUser) return null;
 
   function handleFieldChange<K extends keyof Issue>(field: K, value: Issue[K]) {
     if (!canEdit || !issue) return;
@@ -112,24 +113,53 @@ export function IssueDrawer({
     onUpdate(updated);
   }
 
+  function handleSelectCommentImage(file: File) {
+    if (!issue) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const newAtt: TaskAttachment = {
+        id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        taskId: issue.id,
+        projectId: issue.projectId,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'image/png',
+        url: reader.result as string,
+        caption: `Attached by ${currentUserName}`,
+        uploaderName: currentUserName,
+        uploaderEmail: currentUserEmail,
+        uploadedAt: new Date().toISOString(),
+        isClientVisible: true,
+      };
+      setCommentAttachments(prev => [...prev, newAtt]);
+    };
+    reader.readAsDataURL(file);
+  }
+
   function handleAddComment(e: React.FormEvent) {
     e.preventDefault();
-    if (!commentText.trim() || !issue) return;
+    if ((!commentText.trim() && commentAttachments.length === 0) || !issue) return;
     const newComment: IssueComment = {
       id: 'c-' + Date.now(),
       issueId: issue.id,
       authorName: currentUserName,
       authorEmail: currentUserEmail,
-      content: commentText.trim(),
+      authorRole: isClientUser ? 'client' : undefined,
+      content: commentText.trim() || (commentAttachments.length > 0 ? '(Attached screenshot / image)' : ''),
       isInternal: isClientUser ? false : isInternalComment,
+      attachments: commentAttachments.length > 0 ? commentAttachments : undefined,
       createdAt: new Date().toISOString(),
     };
     const updated = {
       ...issue,
       comments: [...(issue.comments || []), newComment],
+      attachments: commentAttachments.length > 0 
+        ? [...(issue.attachments || []), ...commentAttachments]
+        : (issue.attachments || []),
     };
     onUpdate(updated);
     setCommentText('');
+    setCommentAttachments([]);
     setIsInternalComment(false);
   }
 
@@ -271,13 +301,6 @@ export function IssueDrawer({
           <SheetDescription className="sr-only">
             Issue details for {projectKey}-{issue.number}: {issue.title}
           </SheetDescription>
-
-          {!canEdit && (
-            <div className="flex items-center gap-2 px-5 py-2 bg-muted/40 border-b border-border text-xs text-muted-foreground">
-              <ShieldCheck className="size-3.5 text-primary" />
-              <span>You are viewing this task in read-only mode.</span>
-            </div>
-          )}
 
           <div className="p-5 flex flex-col gap-4 flex-1">
             {/* Title */}
@@ -497,12 +520,19 @@ export function IssueDrawer({
                         className={`p-3 rounded-xl border text-xs flex flex-col gap-1.5 transition-all ${
                           c.isInternal
                             ? 'border-amber-500/30 bg-amber-500/5'
+                            : c.authorRole === 'client'
+                            ? 'border-primary/30 bg-primary/5'
                             : 'border-border/80 bg-card'
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-foreground">{c.authorName}</span>
+                            {c.authorRole === 'client' && (
+                              <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 text-primary border-primary/40 bg-primary/10 font-semibold">
+                                Client Feedback
+                              </Badge>
+                            )}
                             {c.isInternal && (
                               <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 text-amber-700 dark:text-amber-300 border-amber-500/40 bg-amber-500/10">
                                 <Lock className="size-2.5 mr-1" /> Internal
@@ -519,6 +549,38 @@ export function IssueDrawer({
                           </span>
                         </div>
                         <p className="text-foreground/90 leading-relaxed whitespace-pre-wrap">{c.content}</p>
+
+                        {/* Attached Images in Comment */}
+                        {c.attachments && c.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-border/50">
+                            {c.attachments.map((att) => (
+                              <div
+                                key={att.id}
+                                onClick={() => setSelectedPreviewAttachment(att)}
+                                className="group relative cursor-pointer rounded-lg overflow-hidden border border-border/80 bg-muted/30 hover:border-primary transition-all max-w-[140px] shadow-2xs"
+                                title={`Click to zoom ${att.name}`}
+                              >
+                                <div className="h-20 w-32 bg-black/5 flex items-center justify-center overflow-hidden">
+                                  {att.type.startsWith('image/') ? (
+                                    <img 
+                                      src={att.url} 
+                                      alt={att.name} 
+                                      className="w-full h-full object-cover transition-transform group-hover:scale-105" 
+                                    />
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-1 text-muted-foreground p-2">
+                                      <FileText className="size-5 text-primary" />
+                                      <span className="text-[10px] truncate max-w-[100px]">{att.name}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[11px] font-medium gap-1 transition-opacity">
+                                  <Eye className="size-3.5" /> Preview
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -526,6 +588,42 @@ export function IssueDrawer({
 
                 {/* Comment Composer */}
                 <form onSubmit={handleAddComment} className="flex flex-col gap-2 mt-1">
+                  {/* Hidden image file input */}
+                  <input
+                    ref={commentImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleSelectCommentImage(e.target.files[0]);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+
+                  {/* Attached images preview before sending */}
+                  {commentAttachments.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 p-2 rounded-lg bg-muted/40 border border-border/70">
+                      {commentAttachments.map((att) => (
+                        <div key={att.id} className="relative group size-14 rounded-md overflow-hidden border border-border bg-black/10 shrink-0 shadow-2xs">
+                          <img src={att.url} alt={att.name} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setCommentAttachments(prev => prev.filter(a => a.id !== att.id))}
+                            className="absolute top-1 right-1 size-4 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-destructive transition-colors"
+                            title="Remove attached image"
+                          >
+                            <X className="size-2.5" />
+                          </button>
+                        </div>
+                      ))}
+                      <span className="text-[11px] text-muted-foreground">
+                        {commentAttachments.length} {commentAttachments.length === 1 ? 'image' : 'images'} attached
+                      </span>
+                    </div>
+                  )}
+
                   <Textarea
                     rows={2}
                     value={commentText}
@@ -533,27 +631,48 @@ export function IssueDrawer({
                     placeholder={
                       isInternalComment 
                         ? "Write an internal team note (hidden from client)..." 
+                        : isClientUser
+                        ? "Add client comment or report an issue..."
                         : "Write a comment or reply to this task..."
                     }
                     className="text-xs resize-none bg-background border-border/80 rounded-lg focus:border-primary"
                   />
 
-                  <div className="flex items-center justify-between">
-                    {!isClientUser ? (
-                      <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground select-none">
-                        <input
-                          type="checkbox"
-                          checked={isInternalComment}
-                          onChange={(e) => setIsInternalComment(e.target.checked)}
-                          className="rounded border-border text-amber-600 focus:ring-amber-500 size-3.5"
-                        />
-                        <span className="flex items-center gap-1">
-                          <Lock className="size-3 text-amber-500" /> Internal note (team only)
-                        </span>
-                      </label>
-                    ) : <div />}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() => commentImageInputRef.current?.click()}
+                        className="h-7 text-xs gap-1.5 border-border/80 text-muted-foreground hover:text-foreground"
+                        title="Attach image or screenshot to comment"
+                      >
+                        <ImageIcon className="size-3.5 text-primary" />
+                        <span>Attach image</span>
+                      </Button>
 
-                    <Button type="submit" size="xs" disabled={!commentText.trim()} className="gap-1.5 h-7 px-3 text-xs">
+                      {!isClientUser && (
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground select-none">
+                          <input
+                            type="checkbox"
+                            checked={isInternalComment}
+                            onChange={(e) => setIsInternalComment(e.target.checked)}
+                            className="rounded border-border text-amber-600 focus:ring-amber-500 size-3.5"
+                          />
+                          <span className="flex items-center gap-1">
+                            <Lock className="size-3 text-amber-500" /> Internal note
+                          </span>
+                        </label>
+                      )}
+                    </div>
+
+                    <Button 
+                      type="submit" 
+                      size="xs" 
+                      disabled={!commentText.trim() && commentAttachments.length === 0} 
+                      className="gap-1.5 h-7 px-3 text-xs"
+                    >
                       <Send className="size-3" /> Send
                     </Button>
                   </div>
@@ -639,7 +758,7 @@ export function IssueDrawer({
                 />
 
                 {(!issue.attachments || issue.attachments.length === 0) ? (
-                  canEdit ? (
+                  (canEdit || isClientUser) ? (
                     <div
                       onClick={() => fileInputRef.current?.click()}
                       className="border border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-all flex flex-col items-center justify-center gap-2"
@@ -655,7 +774,7 @@ export function IssueDrawer({
                   )
                 ) : (
                   <div className="flex flex-col gap-2.5">
-                    {canEdit && (
+                    {(canEdit || isClientUser) && (
                       <div className="flex justify-end">
                         <Button
                           type="button"

@@ -57,23 +57,21 @@ export function NotificationsPopover({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
+        <button
           type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="relative text-muted-foreground hover:text-foreground"
+          className="relative size-9 rounded-full border border-border bg-white text-muted-foreground hover:text-foreground hover:bg-muted/70 flex items-center justify-center shadow-xs active:scale-95 transition-all cursor-pointer"
           aria-label="Notifications"
         >
           <Bell className="size-4" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground shadow-xs">
+            <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground shadow-xs">
               {unreadCount}
             </span>
           )}
-        </Button>
+        </button>
       </PopoverTrigger>
 
-      <PopoverContent align="end" className="w-[340px] sm:w-[380px] p-0 bg-popover border-border shadow-2xl">
+      <PopoverContent align="end" className="w-[340px] sm:w-[380px] p-0 bg-popover border border-border/80 rounded-2xl shadow-2xl overflow-hidden">
         <div className="p-3.5 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <strong className="text-sm font-semibold text-foreground">Notifications</strong>

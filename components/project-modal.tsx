@@ -326,24 +326,24 @@ export function ProjectModal({
                   key={tpl.id}
                   type="button"
                   className={cn(
-                    'flex flex-col gap-1 p-3 rounded-lg border text-left transition-all',
+                    'flex flex-col gap-1 p-3.5 rounded-xl border text-left transition-all active:scale-[0.99]',
                     isSelected
-                      ? 'border-primary/60 bg-primary/5 shadow-xs'
-                      : 'border-border bg-card hover:bg-accent/40'
+                      ? 'border-primary bg-primary/5 shadow-xs ring-1 ring-primary/40'
+                      : 'border-border bg-card hover:bg-muted/50 hover:border-border/80'
                   )}
                   onClick={() => handleSelectTemplate(tpl.id)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className={`project-dot ${tpl.color}`} />
-                      <strong className="text-sm font-semibold">{tpl.name}</strong>
-                      <Badge variant="outline" className="text-xs">
+                      <strong className="text-sm font-semibold text-foreground">{tpl.name}</strong>
+                      <Badge variant="outline" className="text-xs font-mono font-semibold">
                         {tpl.key}
                       </Badge>
                     </div>
                     {isSelected && <Check className="size-4 text-primary" />}
                   </div>
-                  <p className="text-xs text-muted-foreground line-clamp-1">{tpl.description}</p>
+                  <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">{tpl.description}</p>
                 </button>
               );
             })}

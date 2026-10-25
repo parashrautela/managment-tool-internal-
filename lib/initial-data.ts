@@ -15,6 +15,15 @@ import type {
 
 export const initialPersonas: PersonaUser[] = [
   {
+    id: 'user-client',
+    displayName: 'Emma Watson',
+    email: 'emma.watson@acmeclient.com',
+    role: 'client',
+    title: 'VP of Digital Experience @ Acme Corp',
+    avatarColor: 'orange',
+    assignedProjectIds: ['sample-1', 'sample-2'], // Assigned strictly to Website redesign and Mobile app
+  },
+  {
     id: 'user-admin',
     displayName: 'Sarah Chen',
     email: 'sarah.chen@flowboard.corp',
@@ -40,15 +49,6 @@ export const initialPersonas: PersonaUser[] = [
     title: 'Full-Stack Software Engineer',
     avatarColor: 'green',
     assignedProjectIds: ['sample-1', 'sample-2'],
-  },
-  {
-    id: 'user-client',
-    displayName: 'Emma Watson',
-    email: 'emma.watson@acmeclient.com',
-    role: 'client',
-    title: 'VP of Digital Experience @ Acme Corp',
-    avatarColor: 'orange',
-    assignedProjectIds: ['sample-1', 'sample-2'], // Assigned strictly to Website redesign and Mobile app
   },
 ];
 
@@ -229,6 +229,30 @@ export const initialProjects: Project[] = [
     ],
     createdAt: '2026-09-01',
   },
+  {
+    id: 'proj-1792919942075',
+    workspaceId: 'ws-studio',
+    name: 'JewelIndia',
+    key: 'JWELI',
+    description: 'Jewelry artisan storefront and bespoke marketplace portal.',
+    color: 'purple',
+    ownerId: 'user-admin',
+    projectManagerId: 'user-pm',
+    projectManagerName: 'Alex Morgan',
+    clientCompany: 'JewelIndia Inc',
+    clientContactName: 'Emma Watson',
+    clientContactEmail: 'emma.watson@acmeclient.com',
+    status: 'In progress',
+    priority: 'High',
+    startDate: '2026-10-25',
+    dueDate: '2026-12-15',
+    health: 'On track',
+    objectives: [
+      'Artisan catalog showcasing bespoke handcrafted jewelry',
+      'Interactive client feedback portal for design approvals',
+    ],
+    createdAt: '2026-10-25',
+  },
 ];
 
 export const initialMembers: Member[] = [
@@ -345,6 +369,69 @@ export const initialAttachments: TaskAttachment[] = [
 ];
 
 export const initialIssues: Issue[] = [
+  {
+    id: 'issue-jweli-1',
+    projectId: 'proj-1792919942075',
+    number: 1,
+    title: 'Handcrafted Jewelry Catalog & High-Res Gallery',
+    description: 'Implement modern zoomable image galleries and category filtering for bespoke jewelry collections.',
+    status: 'In progress',
+    priority: 'High',
+    label: 'Feature',
+    assignee: 'm-alex',
+    creatorName: 'Sarah Chen',
+    startDate: '2026-10-25',
+    dueDate: '2026-11-10',
+    isClientVisible: true,
+    subtasks: [
+      { id: 'sub-jweli-1', title: 'High-res image thumbnail grid with lightbox', completed: true },
+      { id: 'sub-jweli-2', title: 'Carat and metal category filter drawer', completed: false },
+    ],
+    comments: [
+      {
+        id: 'c-jweli-1',
+        issueId: 'issue-jweli-1',
+        authorName: 'Alex Morgan',
+        authorEmail: 'alex.morgan@company.com',
+        content: 'Hi! Initial catalog views are ready for review. Feel free to comment or attach screenshots if any changes are needed.',
+        isInternal: false,
+        createdAt: '2026-10-25T12:00:00Z',
+      },
+    ],
+    createdAt: '2026-10-25',
+  },
+  {
+    id: 'issue-jweli-2',
+    projectId: 'proj-1792919942075',
+    number: 2,
+    title: 'Checkout & Secure Payment Integration',
+    description: 'Set up seamless one-click checkout, currency switcher, and automated receipt dispatch.',
+    status: 'To do',
+    priority: 'Urgent',
+    label: 'Feature',
+    assignee: 'm-marcus',
+    creatorName: 'Alex Morgan',
+    startDate: '2026-10-28',
+    dueDate: '2026-11-15',
+    isClientVisible: true,
+    createdAt: '2026-10-25',
+  },
+  {
+    id: 'issue-jweli-3',
+    projectId: 'proj-1792919942075',
+    number: 3,
+    title: 'Design System Tokens & Brand Asset Export',
+    description: 'Curated typography, gold foil gradients, and responsive components for mobile and desktop.',
+    status: 'Done',
+    priority: 'Medium',
+    label: 'Design',
+    assignee: 'm-sarah',
+    creatorName: 'Sarah Chen',
+    startDate: '2026-10-20',
+    dueDate: '2026-10-24',
+    isClientVisible: true,
+    createdAt: '2026-10-20',
+  },
   {
     id: 'issue-1',
     projectId: 'sample-1',
@@ -786,13 +873,13 @@ export const initialInvitations: Invitation[] = [
 ];
 
 export const initialUserProfile: UserProfile = {
-  userId: 'user-admin',
-  displayName: 'Sarah Chen',
-  email: 'sarah.chen@flowboard.corp',
-  role: 'admin',
-  title: 'Head of Product & Operations',
-  bio: 'Building cohesive product experiences and shipping customer-focused tools.',
-  avatarColor: 'purple',
+  userId: 'user-client',
+  displayName: 'Emma Watson',
+  email: 'emma.watson@acmeclient.com',
+  role: 'client',
+  title: 'VP of Digital Experience @ Acme Corp',
+  bio: '',
+  avatarColor: 'orange',
   theme: 'system',
   language: 'en',
   defaultWorkspaceId: 'ws-studio',

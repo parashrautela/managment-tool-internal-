@@ -63,12 +63,18 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<'profile' | 'preferences' | 'notifications' | 'security'>('profile');
 
+  const sanitizeBio = (b?: string) => {
+    if (!b || b.includes('Building cohesive') || b.includes('Reviewing assigned')) return '';
+    return b;
+  };
+
   // Profile fields
   const [displayName, setDisplayName] = useState(initialProfile.displayName);
   const [email, setEmail] = useState(initialProfile.email);
+  const [role, setRole] = useState<'admin' | 'project_manager' | 'employee' | 'client'>(initialProfile.role || 'client');
   const [title, setTitle] = useState(initialProfile.title || '');
-  const [bio, setBio] = useState(initialProfile.bio || '');
-  const [avatarColor, setAvatarColor] = useState(initialProfile.avatarColor || 'purple');
+  const [bio, setBio] = useState(sanitizeBio(initialProfile.bio));
+  const [avatarColor, setAvatarColor] = useState(initialProfile.avatarColor || 'orange');
 
   // Preferences
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(initialProfile.theme || 'system');
@@ -92,9 +98,10 @@ export function SettingsDialog({
     if (isOpen) {
       setDisplayName(initialProfile.displayName);
       setEmail(initialProfile.email);
+      setRole(initialProfile.role || 'client');
       setTitle(initialProfile.title || '');
-      setBio(initialProfile.bio || '');
-      setAvatarColor(initialProfile.avatarColor || 'purple');
+      setBio(sanitizeBio(initialProfile.bio));
+      setAvatarColor(initialProfile.avatarColor || 'orange');
       setTheme(initialProfile.theme || 'system');
       setLanguage(initialProfile.language || 'en');
       setDefaultWorkspaceId(initialProfile.defaultWorkspaceId || workspaces[0]?.id || '');
@@ -121,6 +128,7 @@ export function SettingsDialog({
         ...initialProfile,
         displayName: displayName.trim(),
         email: email.trim(),
+        role,
         title: title.trim(),
         bio: bio.trim(),
         avatarColor,
@@ -257,6 +265,72 @@ export function SettingsDialog({
               </div>
 
               <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="user-role" className="text-xs font-medium text-foreground">
+                    Role & Permissions
+                  </label>
+                  <span className="text-[11px] text-muted-foreground">Select active role</span>
+                </div>
+                <Select
+                  value={role}
+                  onValueChange={(val: 'admin' | 'project_manager' | 'employee' | 'client') => {
+                    setRole(val);
+                    if (val === 'client') {
+                      if (!title || title.includes('Head') || title.includes('Lead') || title.includes('Engineer')) {
+                        setTitle('VP of Digital Experience @ Acme Corp');
+                      }
+                      if (avatarColor === 'purple') setAvatarColor('orange');
+                    } else if (val === 'admin') {
+                      if (!title || title.includes('Acme') || title.includes('Lead') || title.includes('Engineer')) {
+                        setTitle('Head of Product & Operations');
+                      }
+                      if (avatarColor === 'orange') setAvatarColor('purple');
+                    } else if (val === 'project_manager') {
+                      if (!title || title.includes('Acme') || title.includes('Head') || title.includes('Engineer')) {
+                        setTitle('Senior Project Lead');
+                      }
+                      if (avatarColor === 'orange') setAvatarColor('blue');
+                    } else if (val === 'employee') {
+                      if (!title || title.includes('Acme') || title.includes('Head') || title.includes('Lead')) {
+                        setTitle('Full-Stack Software Engineer');
+                      }
+                      if (avatarColor === 'orange') setAvatarColor('green');
+                    }
+                  }}
+                >
+                  <SelectTrigger id="user-role" className="w-full h-9.5 rounded-lg border-border">
+                    <SelectValue placeholder="Select active role" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl shadow-lg border border-border">
+                    <SelectItem value="client" className="rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-amber-500 shrink-0" />
+                        <span>Client (Deliverables & Feedback)</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="employee" className="rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-emerald-500 shrink-0" />
+                        <span>Team Member (Internal Tasks & Updates)</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="project_manager" className="rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-blue-500 shrink-0" />
+                        <span>Project Manager (Sprints & Delivery)</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="admin" className="rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-purple-500 shrink-0" />
+                        <span>Org Admin (Full Access & Settings)</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
                 <label htmlFor="user-title" className="text-xs font-medium text-foreground">
                   Role / Job title
                 </label>
@@ -264,7 +338,7 @@ export function SettingsDialog({
                   id="user-title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Staff Product Designer, Engineering Manager"
+                  placeholder="e.g. VP of Digital Experience @ Acme Corp"
                 />
               </div>
 

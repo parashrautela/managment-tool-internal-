@@ -72,7 +72,7 @@ export function PersonaSwitcher({ currentPersona, onSelectPersona }: PersonaSwit
           <Button
             variant="outline"
             size="sm"
-            className="h-8 gap-1.5 px-2 text-xs border-border bg-card hover:bg-accent/50 shadow-xs shrink-0"
+            className="h-8.5 gap-1.5 px-3 rounded-full text-xs border-border/80 bg-card hover:bg-accent/50 shadow-xs active:scale-[0.98] transition-all shrink-0"
             title="Switch User Role Persona"
           >
             <div className="flex items-center gap-1.5 shrink-0">
@@ -91,7 +91,7 @@ export function PersonaSwitcher({ currentPersona, onSelectPersona }: PersonaSwit
           </Button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="end" className="w-[300px] p-2 bg-popover border-border shadow-xl">
+        <DropdownMenuContent align="end" className="w-[300px] p-2 bg-popover border-border/80 rounded-2xl shadow-xl">
           <DropdownMenuLabel className="px-2 py-1.5 text-xs text-muted-foreground font-semibold flex items-center justify-between">
             <span>Switch Role / User Persona</span>
             <Sparkles className="size-3.5 text-primary" />
@@ -106,13 +106,12 @@ export function PersonaSwitcher({ currentPersona, onSelectPersona }: PersonaSwit
             {initialPersonas.map((persona) => {
               const isSelected = persona.id === currentPersona.id;
               const pMeta = roleMeta[persona.role];
-              const PIcon = pMeta.icon;
 
               return (
                 <DropdownMenuItem
                   key={persona.id}
                   onClick={() => onSelectPersona(persona)}
-                  className={`flex flex-col items-start gap-1 p-2.5 rounded-lg cursor-pointer transition-colors ${
+                  className={`flex flex-col items-start gap-1 p-2.5 rounded-xl cursor-pointer transition-colors ${
                     isSelected ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
                   }`}
                 >
@@ -125,7 +124,7 @@ export function PersonaSwitcher({ currentPersona, onSelectPersona }: PersonaSwit
                         {persona.displayName}
                       </strong>
                     </div>
-                    <Badge variant="outline" className={`text-[10px] ${pMeta.color}`}>
+                    <Badge variant="outline" className={`text-[10px] font-semibold ${pMeta.color}`}>
                       {pMeta.label}
                     </Badge>
                   </div>

@@ -178,7 +178,7 @@ export function TaskGroupChatModal({
               </span>
             </div>
 
-            {onOpenTaskDetails && (
+            {!isClientUser && onOpenTaskDetails && (
               <Button
                 variant="ghost"
                 size="xs"

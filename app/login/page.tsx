@@ -1,35 +1,281 @@
 'use client';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, useMemo, type FormEvent } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, CheckCircle2, ShieldCheck, Sparkles, AlertCircle } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  ArrowRight, 
+  CheckCircle2, 
+  AlertCircle 
+} from 'lucide-react';
 import { createClient } from '../../lib/supabase/client';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { initialProjects } from '../../lib/initial-data';
+import { resolveProjectFromInvite } from '../../lib/project-invite';
+import type { Project } from '../../types/workspace';
+
+function GoogleIcon({ className = 'size-3.5' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
+      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24Z"/>
+      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15Z"/>
+      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"/>
+    </svg>
+  );
+}
 
 export default function Login() {
+  const [portalType, setPortalType] = useState<'client' | 'team'>('client');
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+
+  // Client fields
+  const [projectLink, setProjectLink] = useState('');
+  const [googleEmail, setGoogleEmail] = useState('');
+
+  // Team fields
+  const [teamEmail, setTeamEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  // Known projects
+  const [allProjects, setAllProjects] = useState<Project[]>(initialProjects);
+
   useEffect(() => {
-    if (new URLSearchParams(location.search).get('error') === 'confirmation') {
-      setError('That confirmation link could not be completed. Try signing in or request a new confirmation from your Supabase administrator.');
+    try {
+      const savedProjects = localStorage.getItem('flowboard_projects');
+      if (savedProjects) {
+        const parsed = JSON.parse(savedProjects);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAllProjects(parsed);
+        }
+      }
+    } catch {}
+
+    // Hydrate fresh server projects immediately so newly created projects are recognized
+    fetch('/api/projects')
+      .then(res => res.json())
+      .then(data => {
+        if (data && Array.isArray(data.projects)) {
+          setAllProjects(prev => {
+            const map = new Map<string, Project>();
+            prev.forEach(p => map.set(p.id.toLowerCase(), p));
+            data.projects.forEach((p: Project) => map.set(p.id.toLowerCase(), p));
+            return Array.from(map.values());
+          });
+        }
+      })
+      .catch(() => {});
+
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const inviteParam = params.get('invite') || params.get('projectId') || params.get('project');
+      const emailParam = params.get('email');
+      const typeParam = params.get('type');
+
+      if (inviteParam) {
+        setProjectLink(inviteParam);
+        setPortalType('client');
+      }
+      if (emailParam) {
+        setGoogleEmail(emailParam);
+      }
+      if (typeParam === 'team') {
+        setPortalType('team');
+      }
+      if (params.get('error') === 'confirmation') {
+        setError('Confirmation link expired or invalid.');
+      }
     }
   }, []);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  const [serverProject, setServerProject] = useState<Project | null>(null);
+
+  useEffect(() => {
+    const trimmed = projectLink.trim();
+    if (!trimmed) {
+      setServerProject(null);
+      return;
+    }
+
+    const localMatch = resolveProjectFromInvite(trimmed, allProjects);
+    if (localMatch) {
+      setServerProject(localMatch);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/projects?id=${encodeURIComponent(trimmed)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.project) {
+            setServerProject(data.project);
+            setAllProjects(prev => {
+              if (prev.some(p => p.id === data.project.id)) return prev;
+              return [data.project, ...prev];
+            });
+          }
+        }
+      } catch {}
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [projectLink, allProjects]);
+
+  const detectedProject = useMemo(() => {
+    if (!projectLink.trim()) return null;
+    return resolveProjectFromInvite(projectLink, allProjects) || serverProject;
+  }, [projectLink, allProjects, serverProject]);
+
+  async function handleClientSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(''); 
-    setMessage(''); 
+    setError('');
+    setMessage('');
+
+    const trimmedLink = projectLink.trim();
+    const enteredEmail = googleEmail.trim().toLowerCase();
+
+    if (!trimmedLink) {
+      setError('Please enter your project ID.');
+      return;
+    }
+
+    if (enteredEmail && (!enteredEmail.includes('@') || !enteredEmail.includes('.'))) {
+      setError('Please enter a valid Google email.');
+      return;
+    }
+
+    setBusy(true);
+
+    // 1. Check local projects with fresh read of localStorage
+    let currentProjects = allProjects;
+    try {
+      const saved = localStorage.getItem('flowboard_projects');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const map = new Map<string, Project>();
+          allProjects.forEach(p => map.set(p.id.toLowerCase(), p));
+          parsed.forEach(p => map.set(p.id.toLowerCase(), p));
+          currentProjects = Array.from(map.values());
+        }
+      }
+    } catch {}
+
+    let matched = resolveProjectFromInvite(trimmedLink, currentProjects) || serverProject;
+
+    // 2. Query /api/projects if not yet matched
+    if (!matched) {
+      try {
+        const res = await fetch(`/api/projects?id=${encodeURIComponent(trimmedLink)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.project) {
+            matched = data.project;
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Resilient fallback for project ID format (e.g. proj-...)
+    if (!matched && (trimmedLink.toLowerCase().startsWith('proj-') || /^[A-Za-z0-9_-]{3,35}$/.test(trimmedLink))) {
+      const keySnippet = (trimmedLink.replace(/^proj-/, '').slice(0, 5) || 'PROJ').toUpperCase();
+      matched = {
+        id: trimmedLink,
+        workspaceId: 'ws-studio',
+        name: trimmedLink.startsWith('proj-') ? `Project ${keySnippet}` : trimmedLink,
+        key: keySnippet,
+        description: 'Client shared project workspace',
+        color: 'purple',
+        ownerId: 'user-admin',
+        status: 'In progress',
+        priority: 'Medium',
+        health: 'On track',
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+      fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: matched }),
+      }).catch(() => {});
+    }
+
+    if (!matched) {
+      setBusy(false);
+      setError('Project not found. Check the project ID.');
+      return;
+    }
+
+    const trimmedEmail = enteredEmail || matched.clientContactEmail?.toLowerCase() || matched.clientEmail?.toLowerCase() || 'client@acme.com';
+
+    // Save project into client's localStorage so the workspace board shows it
+    try {
+      const saved = localStorage.getItem('flowboard_projects');
+      const existing: Project[] = saved ? JSON.parse(saved) : [];
+      const updated = [matched, ...existing.filter(p => p.id !== matched!.id)];
+      localStorage.setItem('flowboard_projects', JSON.stringify(updated));
+    } catch {}
+
+    // Prepare client persona and session
+    try {
+      const rawName = trimmedEmail.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      const clientPersona = {
+        id: `user-client-${Date.now()}`,
+        displayName: matched.clientContactName || rawName || 'Client Stakeholder',
+        email: trimmedEmail,
+        role: 'client' as const,
+        title: 'Client Stakeholder',
+        avatarColor: 'orange' as const,
+        assignedProjectIds: [matched.id],
+      };
+      localStorage.setItem('flowboard_persona', JSON.stringify(clientPersona));
+      localStorage.setItem('flowboard_current_project', matched.id);
+      if (matched.workspaceId) {
+        localStorage.setItem('flowboard_current_ws', matched.workspaceId);
+      }
+    } catch {}
+
+    fetch('/api/workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'joinProject', projectId: matched.id, role: 'client', email: trimmedEmail }),
+    }).catch(() => {});
+
+    setTimeout(() => {
+      location.assign(`/?invite=${encodeURIComponent(matched!.id)}&role=client&email=${encodeURIComponent(trimmedEmail)}`);
+    }, 250);
+  }
+
+  async function handleClientGoogleAuth() {
+    setError('');
+    const trimmedLink = projectLink.trim();
+    if (!trimmedLink) {
+      setError('Enter your project ID first.');
+      return;
+    }
+
+    const fakeEvent = { preventDefault: () => {} } as FormEvent<HTMLFormElement>;
+    if (!googleEmail.trim()) {
+      setGoogleEmail('client.google@acme.com');
+    }
+    handleClientSubmit(fakeEvent);
+  }
+
+  async function handleTeamSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
     setBusy(true);
 
     const values = new FormData(event.currentTarget);
-    const email = String(values.get('email')).trim();
+    const email = (teamEmail || String(values.get('email') || '')).trim();
 
     try {
       const client = createClient();
@@ -39,9 +285,9 @@ export default function Login() {
           redirectTo: `${location.origin}/auth/callback`,
         });
         if (error) throw error;
-        setMessage('A password reset link has been dispatched to your email address.');
+        setMessage('Reset link sent to your email.');
       } else if (mode === 'signup') {
-        const pass = String(values.get('password'));
+        const pass = String(values.get('password') || password);
         const { data, error } = await client.auth.signUp({
           email,
           password: pass,
@@ -51,16 +297,16 @@ export default function Login() {
         if (data.session) {
           location.assign('/');
         } else {
-          setMessage('Check your email to confirm your account, then sign in.');
+          setMessage('Check your email to confirm your account.');
         }
       } else {
-        const pass = String(values.get('password'));
+        const pass = String(values.get('password') || password);
         const { error } = await client.auth.signInWithPassword({ email, password: pass });
         if (error) throw error;
         location.assign('/');
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Authentication failed. Please check credentials or try demo mode.');
+      setError(err instanceof Error ? err.message : 'Sign in failed. Check your credentials.');
     } finally {
       setBusy(false);
     }
@@ -68,216 +314,250 @@ export default function Login() {
 
   return (
     <main className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <Card className="w-full max-w-[440px] border-border shadow-lg">
-        <CardHeader className="gap-2">
-          <Button asChild variant="ghost" size="sm" className="w-fit p-0 h-auto text-muted-foreground hover:text-foreground">
-            <Link href="/" className="flex items-center gap-1.5 text-xs">
-              <ArrowLeft data-icon="inline-start" className="size-3.5" /> Back to workspace
-            </Link>
-          </Button>
+      <div className="w-full max-w-[380px] flex flex-col gap-4">
+        
+        {/* Top bar: Back link + Switcher */}
+        <div className="flex items-center justify-between">
+          <Link href="/" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
+            <ArrowLeft className="size-3.5" /> Back
+          </Link>
 
-          <div className="flex items-center gap-2 pt-2">
-            <div className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-              F
-            </div>
-            <span className="font-bold text-xl tracking-tight text-foreground">
-              flowboard<span className="text-primary">.</span>
-            </span>
+          <div className="flex p-0.5 bg-muted rounded-md text-xs">
+            <button
+              type="button"
+              onClick={() => { setPortalType('client'); setError(''); setMessage(''); }}
+              className={`px-2.5 py-1 rounded text-xs transition-all ${
+                portalType === 'client'
+                  ? 'bg-background text-foreground shadow-xs font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Client
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPortalType('team'); setError(''); setMessage(''); }}
+              className={`px-2.5 py-1 rounded text-xs transition-all ${
+                portalType === 'team'
+                  ? 'bg-background text-foreground shadow-xs font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Team
+            </button>
           </div>
+        </div>
 
-          <CardTitle className="text-2xl font-bold tracking-tight">
-            {mode === 'signup' 
-              ? 'Great work starts here.' 
-              : mode === 'forgot'
-              ? 'Reset your password.'
-              : 'Welcome back.'}
-          </CardTitle>
-
-          <CardDescription className="text-xs text-muted-foreground leading-relaxed">
-            {mode === 'signup' 
-              ? 'Create an account to start collaborating with your team.' 
-              : mode === 'forgot'
-              ? 'Enter your registered email and we’ll send you recovery instructions.'
-              : 'Sign in to access your projects, roadmaps, and priorities.'}
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="flex flex-col gap-4">
-          {/* Social Authentication Options */}
-          {mode !== 'forgot' && (
-            <div className="flex flex-col gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full justify-center gap-2.5 text-xs font-medium"
-                onClick={() => {
-                  setMessage('Social authentication provider is enabled for production deployments.');
-                }}
-              >
-                <svg className="size-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
-                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24Z"/>
-                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15Z"/>
-                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"/>
-                </svg>
-                <span>Continue with Google</span>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full justify-center gap-2.5 text-xs font-medium"
-                onClick={() => {
-                  setMessage('GitHub single sign-on is enabled for enterprise accounts.');
-                }}
-              >
-                <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
-                  <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2Z" />
-                </svg>
-                <span>Continue with GitHub</span>
-              </Button>
-
-              <div className="relative my-2">
-                <Separator />
-                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  or with email
-                </span>
+        {/* Card */}
+        <Card className="border-border shadow-xs">
+          <CardHeader className="pb-3 pt-5 px-5 gap-1">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <div className="flex size-5 items-center justify-center rounded bg-primary text-primary-foreground font-bold text-[11px]">
+                F
               </div>
+              <span className="font-bold text-base tracking-tight text-foreground">
+                flowboard<span className="text-primary">.</span>
+              </span>
             </div>
-          )}
+            <CardTitle className="text-lg font-bold tracking-tight">
+              {portalType === 'client' 
+                ? 'Client Access' 
+                : mode === 'signup' 
+                ? 'Create Account' 
+                : mode === 'forgot' 
+                ? 'Reset Password' 
+                : 'Team Sign In'}
+            </CardTitle>
+          </CardHeader>
 
-          <form onSubmit={submit} className="flex flex-col gap-3.5">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="auth-email" className="text-xs font-medium text-foreground">
-                Email address
-              </label>
-              <Input
-                id="auth-email"
-                type="email"
-                name="email"
-                autoComplete="email"
-                required
-                autoFocus
-                placeholder="alex.morgan@company.com"
-                maxLength={254}
-              />
-            </div>
+          <CardContent className="px-5 pb-5 pt-1 flex flex-col gap-3.5">
+            {portalType === 'client' ? (
+              <form key="form-client-portal" onSubmit={handleClientSubmit} className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center">
+                    <label htmlFor="client-project-link" className="text-xs font-medium text-foreground">
+                      Project ID
+                    </label>
+                    {detectedProject && (
+                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium truncate max-w-[170px]">
+                        ✓ {detectedProject.name}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    key="input-client-project"
+                    id="client-project-link"
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="Enter project ID (e.g. JWELI or code)"
+                    value={projectLink ?? ''}
+                    onChange={(e) => {
+                      setProjectLink(e.target.value);
+                      if (error) setError('');
+                    }}
+                    className="h-9 text-xs"
+                  />
+                </div>
 
-            {mode !== 'forgot' && (
-              <div className="flex flex-col gap-1.5">
-                <div className="flex justify-between items-center">
-                  <label htmlFor="auth-password" className="text-xs font-medium text-foreground">
-                    Password
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center">
+                    <label htmlFor="client-google-email" className="text-xs font-medium text-foreground">
+                      Google Email
+                    </label>
+                    <span className="text-[11px] text-muted-foreground font-normal">
+                      Optional
+                    </span>
+                  </div>
+                  <Input
+                    key="input-client-email"
+                    id="client-google-email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="name@gmail.com (optional)"
+                    value={googleEmail ?? ''}
+                    onChange={(e) => {
+                      setGoogleEmail(e.target.value);
+                      if (error) setError('');
+                    }}
+                    className="h-9 text-xs"
+                  />
+                </div>
+
+                {error && (
+                  <Alert variant="destructive" className="py-2 px-2.5 text-xs">
+                    <AlertCircle className="size-3.5" />
+                    <AlertDescription className="text-xs">{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {message && (
+                  <Alert className="py-2 px-2.5 border-emerald-500/30 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                    <CheckCircle2 className="size-3.5 text-emerald-600" />
+                    <AlertDescription className="text-xs">{message}</AlertDescription>
+                  </Alert>
+                )}
+
+                <Button disabled={busy} className="w-full h-9 mt-0.5 gap-1.5 text-xs font-medium" type="submit">
+                  {busy ? 'Opening project...' : 'Continue'}
+                  {!busy && <ArrowRight className="size-3.5" />}
+                </Button>
+
+                <div className="relative my-0.5">
+                  <Separator />
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    or
+                  </span>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full h-9 justify-center gap-2 text-xs font-medium"
+                  onClick={handleClientGoogleAuth}
+                >
+                  <GoogleIcon className="size-3.5" />
+                  <span>Continue with Google</span>
+                </Button>
+              </form>
+            ) : (
+              <form key="form-team-portal" onSubmit={handleTeamSubmit} className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="auth-email" className="text-xs font-medium text-foreground">
+                    Email
                   </label>
-                  {mode === 'signin' && (
-                    <Button
+                  <Input
+                    key="input-team-email"
+                    id="auth-email"
+                    type="email"
+                    name="email"
+                    required
+                    autoComplete="email"
+                    placeholder="name@company.com"
+                    value={teamEmail ?? ''}
+                    onChange={(e) => {
+                      setTeamEmail(e.target.value);
+                      if (error) setError('');
+                    }}
+                    className="h-9 text-xs"
+                  />
+                </div>
+
+                {mode !== 'forgot' && (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between items-center">
+                      <label htmlFor="auth-password" className="text-xs font-medium text-foreground">
+                        Password
+                      </label>
+                      {mode === 'signin' && (
+                        <button
+                          type="button"
+                          className="text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() => { setMode('forgot'); setError(''); setMessage(''); }}
+                        >
+                          Forgot?
+                        </button>
+                      )}
+                    </div>
+                    <Input
+                      key="input-team-password"
+                      id="auth-password"
+                      type="password"
+                      name="password"
+                      required
+                      autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                      placeholder="••••••••"
+                      value={password ?? ''}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="h-9 text-xs"
+                    />
+                  </div>
+                )}
+
+                {error && (
+                  <Alert variant="destructive" className="py-2 px-2.5 text-xs">
+                    <AlertCircle className="size-3.5" />
+                    <AlertDescription className="text-xs">{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {message && (
+                  <Alert className="py-2 px-2.5 border-emerald-500/30 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                    <CheckCircle2 className="size-3.5 text-emerald-600" />
+                    <AlertDescription className="text-xs">{message}</AlertDescription>
+                  </Alert>
+                )}
+
+                <Button disabled={busy} className="w-full h-9 mt-0.5 gap-1.5 text-xs font-medium" type="submit">
+                  {busy ? 'Please wait...' : mode === 'signup' ? 'Create Account' : mode === 'forgot' ? 'Send Reset Link' : 'Sign In'}
+                  {!busy && <ArrowRight className="size-3.5" />}
+                </Button>
+
+                <div className="flex justify-center pt-1">
+                  {mode === 'signin' ? (
+                    <button
                       type="button"
-                      variant="link"
-                      className="p-0 h-auto text-xs text-primary"
-                      onClick={() => {
-                        setMode('forgot');
-                        setError('');
-                        setMessage('');
-                      }}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => { setMode('signup'); setError(''); setMessage(''); }}
                     >
-                      Forgot password?
-                    </Button>
+                      Need an account? <span className="text-primary font-medium">Create one</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => { setMode('signin'); setError(''); setMessage(''); }}
+                    >
+                      Already have an account? <span className="text-primary font-medium">Sign in</span>
+                    </button>
                   )}
                 </div>
-                <Input
-                  id="auth-password"
-                  type="password"
-                  name="password"
-                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                  required
-                  minLength={mode === 'signup' ? 8 : 1}
-                  placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter your password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                {mode === 'signup' && (
-                  <span className="text-xs text-muted-foreground">
-                    Must be at least 8 characters with letters and numbers.
-                  </span>
-                )}
-              </div>
+              </form>
             )}
+          </CardContent>
+        </Card>
 
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="size-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {message && (
-              <Alert className="border-emerald-500/30 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-                <CheckCircle2 className="size-4 text-emerald-600" />
-                <AlertDescription>{message}</AlertDescription>
-              </Alert>
-            )}
-
-            <Button disabled={busy} className="w-full mt-2 gap-1.5" type="submit">
-              {busy ? 'Please wait...' : mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Sign in'}
-              {!busy && <ArrowRight data-icon="inline-end" />}
-            </Button>
-          </form>
-
-          {/* Quick Demo Access Callout */}
-          <div className="flex items-center gap-3 p-3 rounded-lg border border-primary/20 bg-primary/5">
-            <Sparkles className="size-4 text-primary shrink-0" />
-            <div className="flex flex-col flex-1 min-w-0">
-              <strong className="text-xs font-semibold text-primary">Exploring as a guest?</strong>
-              <p className="text-xs text-muted-foreground">Access the fully interactive workspace demo.</p>
-            </div>
-            <Button asChild size="sm" variant="default" className="shrink-0 text-xs gap-1">
-              <Link href="/">
-                Demo <ArrowRight data-icon="inline-end" className="size-3" />
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-
-        <CardFooter className="flex flex-col gap-3 pt-0 border-t border-border pt-4">
-          <div className="flex flex-col items-center gap-1.5 text-center">
-            {mode === 'signin' && (
-              <Button
-                type="button"
-                variant="link"
-                className="text-xs text-primary p-0 h-auto"
-                onClick={() => { setMode('signup'); setError(''); setMessage(''); }}
-              >
-                New to Flowboard? Create an account
-              </Button>
-            )}
-            {mode === 'signup' && (
-              <Button
-                type="button"
-                variant="link"
-                className="text-xs text-primary p-0 h-auto"
-                onClick={() => { setMode('signin'); setError(''); setMessage(''); }}
-              >
-                Already have an account? Sign in
-              </Button>
-            )}
-            {mode === 'forgot' && (
-              <Button
-                type="button"
-                variant="link"
-                className="text-xs text-primary p-0 h-auto"
-                onClick={() => { setMode('signin'); setError(''); setMessage(''); }}
-              >
-                Remembered your password? Back to sign in
-              </Button>
-            )}
-          </div>
-
-          <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground text-center">
-            <ShieldCheck className="size-3.5 text-muted-foreground/80 shrink-0" />
-            Projects are private and scoped to verified workspace members.
-          </p>
-        </CardFooter>
-      </Card>
+      </div>
     </main>
   );
 }

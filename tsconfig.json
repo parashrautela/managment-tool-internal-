@@ -46,6 +46,7 @@
     "dist",
     "scripts",
     "vite.config.ts",
-    "cloudflare-env.d.ts"
+    "cloudflare-env.d.ts",
+    "**/* *"
   ]
 }

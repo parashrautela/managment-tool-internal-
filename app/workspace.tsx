@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo, type FormEvent } from 'react';
+import { useEffect, useState, useMemo, useRef, type FormEvent } from 'react';
 import { 
   ArrowUpRight, 
   ArrowRight, 
@@ -48,7 +48,8 @@ import {
   AlertCircle,
   Building2,
   Copy,
-  Mail
+  Mail,
+  Trash2
 } from 'lucide-react';
 import { canManage, canEdit, canChangeMember, isClient, canViewInternal, canCreateProject, statuses, priorities } from '../lib/permissions';
 import type { 
@@ -94,7 +95,6 @@ import { ProjectModal } from '../components/project-modal';
 import { WorkspaceModal } from '../components/workspace-modal';
 import { SettingsDialog } from '../components/settings-dialog';
 import { InstallButton } from '../components/install-button';
-import { PersonaSwitcher, ClientPortalBanner } from '../components/persona-switcher';
 import { NotificationsPopover } from '../components/notifications-popover';
 import { ProjectMilestones } from '../components/project-milestones';
 import { ProjectFiles } from '../components/project-files';
@@ -102,6 +102,7 @@ import { ProjectChat } from '../components/project-chat';
 import { ClientFeedbackModal } from '../components/client-feedback-modal';
 import { MediaViewerModal } from '../components/media-viewer-modal';
 import { TaskGroupChatModal } from '../components/task-group-chat-modal';
+import { resolveProjectFromInvite } from '../lib/project-invite';
 import {
   Dialog,
   DialogContent,
@@ -248,7 +249,14 @@ export default function WorkspaceApp() {
       const savedCurWs = localStorage.getItem('flowboard_current_ws');
       if (savedCurWs) setCurrentWsId(savedCurWs);
       const savedProjects = localStorage.getItem('flowboard_projects');
-      if (savedProjects) setAllProjects(JSON.parse(savedProjects));
+      if (savedProjects) {
+        try {
+          const parsed = JSON.parse(savedProjects);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAllProjects(parsed);
+          }
+        } catch {}
+      }
       const savedMembers = localStorage.getItem('flowboard_members');
       if (savedMembers) setAllMembers(JSON.parse(savedMembers));
       const savedIssues = localStorage.getItem('flowboard_issues');
@@ -256,9 +264,22 @@ export default function WorkspaceApp() {
       const savedActivities = localStorage.getItem('flowboard_activities');
       if (savedActivities) setActivities(JSON.parse(savedActivities));
       const savedProfile = localStorage.getItem('flowboard_profile');
-      if (savedProfile) setUserProfile(JSON.parse(savedProfile));
       const savedPersona = localStorage.getItem('flowboard_persona');
-      if (savedPersona) setCurrentPersona(JSON.parse(savedPersona));
+      const hasExplicitRole = localStorage.getItem('flowboard_role_set');
+      if (savedProfile && hasExplicitRole) {
+        const parsed = JSON.parse(savedProfile);
+        if (parsed.bio && (parsed.bio.includes('Building cohesive') || parsed.bio.includes('Reviewing assigned'))) {
+          parsed.bio = '';
+        }
+        setUserProfile(parsed);
+      } else {
+        setUserProfile(initialUserProfile);
+      }
+      if (savedPersona && hasExplicitRole) {
+        setCurrentPersona(JSON.parse(savedPersona));
+      } else {
+        setCurrentPersona(initialPersonas[0]);
+      }
       const savedMilestones = localStorage.getItem('flowboard_milestones');
       if (savedMilestones) setMilestones(JSON.parse(savedMilestones));
       const savedAttachments = localStorage.getItem('flowboard_attachments');
@@ -276,25 +297,74 @@ export default function WorkspaceApp() {
         const inviteEmailParam = params.get('email');
         if (inviteProj) {
           if (inviteRoleParam === 'client') {
-            const clientPersona = initialPersonas.find(p => p.role === 'client') || {
+            const rawName = inviteEmailParam
+              ? inviteEmailParam.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+              : 'Client Stakeholder';
+            const basePersona = initialPersonas.find(p => p.role === 'client') || {
               id: 'user-client',
-              displayName: inviteEmailParam ? inviteEmailParam.split('@')[0] : 'Emma Watson',
+              displayName: rawName,
               email: inviteEmailParam || 'emma.watson@acmeclient.com',
               role: 'client' as const,
-              title: 'VP of Digital Experience @ Acme Corp',
+              title: 'Client Stakeholder',
               avatarColor: 'orange' as const,
               assignedProjectIds: [inviteProj],
             };
-            const updatedAssigned = Array.from(new Set([...(clientPersona.assignedProjectIds || []), inviteProj]));
-            const resolvedPersona = { ...clientPersona, assignedProjectIds: updatedAssigned };
+            const updatedAssigned = Array.from(new Set([...(basePersona.assignedProjectIds || []), inviteProj]));
+            const resolvedPersona = {
+              ...basePersona,
+              displayName: inviteEmailParam ? rawName : basePersona.displayName,
+              email: inviteEmailParam || basePersona.email,
+              assignedProjectIds: updatedAssigned,
+            };
             setCurrentPersona(resolvedPersona);
             persist('flowboard_persona', resolvedPersona);
-            setNotice('Welcome! You have joined as a Client via invite link.');
+            setUserProfile(prev => ({
+              ...prev,
+              displayName: resolvedPersona.displayName,
+              email: resolvedPersona.email,
+              title: resolvedPersona.title || 'Client Stakeholder',
+            }));
+            setNotice(`Welcome! You have joined as a Client (${resolvedPersona.displayName}).`);
           } else {
             setNotice('Joined project via invite link.');
           }
           if (inviteProj !== 'workspace') {
-            setSelectedProjectId(inviteProj);
+            const localFound = resolveProjectFromInvite(inviteProj, allProjects);
+            const actualId = localFound ? localFound.id : inviteProj;
+            setSelectedProjectId(actualId);
+            setPage('projects');
+            setTab('Board');
+
+            // Fetch project from server registry so client can see it even across incognito or new devices
+            fetch(`/api/projects?id=${encodeURIComponent(inviteProj)}`)
+              .then(r => r.json())
+              .then(d => {
+                if (d.project) {
+                  setSelectedProjectId(d.project.id);
+                  setTab('Board');
+                  setPage('projects');
+                  if (d.project.workspaceId) {
+                    setCurrentWsId(d.project.workspaceId);
+                    try { localStorage.setItem('flowboard_current_ws', d.project.workspaceId); } catch {}
+                  }
+                  setAllProjects(prev => {
+                    const map = new Map<string, Project>();
+                    prev.forEach(p => map.set(p.id.toLowerCase(), p));
+                    map.set(d.project.id.toLowerCase(), d.project);
+                    const updated = Array.from(map.values());
+                    try { localStorage.setItem('flowboard_projects', JSON.stringify(updated)); } catch {}
+                    return updated;
+                  });
+                  // Ensure client persona is assigned to this project
+                  setCurrentPersona(prev => {
+                    const nextAssigned = Array.from(new Set([...(prev.assignedProjectIds || []), d.project.id]));
+                    const updatedP = { ...prev, assignedProjectIds: nextAssigned };
+                    try { localStorage.setItem('flowboard_persona', JSON.stringify(updatedP)); } catch {}
+                    return updatedP;
+                  });
+                }
+              })
+              .catch(() => {});
           }
           window.history.replaceState({}, document.title, window.location.pathname);
         }
@@ -304,14 +374,276 @@ export default function WorkspaceApp() {
     }
   }, []);
 
-  // Save changes to localStorage
-  function persist<T>(key: string, data: T) {
+  const lastSyncTimeRef = useRef<number>(0);
+
+  // Save changes to localStorage, broadcast across open tabs, and sync to persistent server store
+  function persist<T>(key: string, data: T, metaProjectId?: string) {
     try {
       localStorage.setItem(key, JSON.stringify(data));
     } catch {
       // Ignore
     }
+
+    if (typeof window !== 'undefined' && key.startsWith('flowboard_')) {
+      // 1. Broadcast instantaneously to other tabs on the same browser (< 15ms)
+      try {
+        if ('BroadcastChannel' in window) {
+          const channel = new BroadcastChannel('flowboard_sync_channel');
+          channel.postMessage({ key, data, metaProjectId, timestamp: Date.now() });
+          channel.close();
+        }
+      } catch {}
+
+      // 2. Persist to server store asynchronously
+      fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key,
+          data,
+          projectId: metaProjectId || selectedProjectId || undefined,
+        }),
+      })
+        .then(res => res.json())
+        .then(result => {
+          if (result && result.lastModified) {
+            lastSyncTimeRef.current = result.lastModified;
+          }
+        })
+        .catch(() => {});
+    }
   }
+
+  // Live real-time cross-user & cross-device synchronization engine
+  useEffect(() => {
+    let isMounted = true;
+    let isFetching = false;
+
+    async function syncWithServer() {
+      if (isFetching) return;
+      isFetching = true;
+      try {
+        const url = lastSyncTimeRef.current > 0
+          ? `/api/sync?since=${lastSyncTimeRef.current}`
+          : '/api/sync';
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isMounted) return;
+
+        if (data.upToDate) {
+          if (data.lastModified) lastSyncTimeRef.current = data.lastModified;
+          return;
+        }
+
+        if (data.lastModified) {
+          lastSyncTimeRef.current = data.lastModified;
+        }
+
+        // 1. Update Projects
+        if (Array.isArray(data.projects) && data.projects.length > 0) {
+          setAllProjects(prev => {
+            const map = new Map<string, Project>();
+            prev.forEach(p => map.set(p.id.toLowerCase(), p));
+            data.projects.forEach((p: Project) => map.set(p.id.toLowerCase(), p));
+            const merged = Array.from(map.values());
+            if (
+              prev.length === merged.length &&
+              prev.every((p, idx) =>
+                p.id === merged[idx].id &&
+                p.name === merged[idx].name &&
+                p.status === merged[idx].status &&
+                p.priority === merged[idx].priority &&
+                p.health === merged[idx].health &&
+                p.workspaceId === merged[idx].workspaceId
+              )
+            ) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_projects', JSON.stringify(merged)); } catch {}
+            return merged;
+          });
+        }
+
+        // 2. Update Issues / Tasks
+        if (Array.isArray(data.issues)) {
+          setAllIssues(prev => {
+            if (
+              prev.length === data.issues.length &&
+              prev.every((iss, idx) =>
+                iss.id === data.issues[idx].id &&
+                iss.status === data.issues[idx].status &&
+                iss.title === data.issues[idx].title &&
+                iss.priority === data.issues[idx].priority &&
+                iss.assignee === data.issues[idx].assignee
+              )
+            ) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_issues', JSON.stringify(data.issues)); } catch {}
+            return data.issues;
+          });
+          // Keep active drawer in sync if open
+          setActiveDrawerIssue(prev => {
+            if (!prev) return null;
+            const updated = data.issues.find((i: Issue) => i.id === prev.id);
+            return updated || prev;
+          });
+        }
+
+        // 3. Update Milestones
+        if (Array.isArray(data.milestones)) {
+          setMilestones(prev => {
+            if (
+              prev.length === data.milestones.length &&
+              prev.every((m, idx) =>
+                m.id === data.milestones[idx].id &&
+                m.status === data.milestones[idx].status &&
+                m.progress === data.milestones[idx].progress
+              )
+            ) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_milestones', JSON.stringify(data.milestones)); } catch {}
+            return data.milestones;
+          });
+        }
+
+        // 4. Update Attachments
+        if (Array.isArray(data.attachments)) {
+          setAttachments(prev => {
+            if (prev.length === data.attachments.length && prev.every((a, idx) => a.id === data.attachments[idx].id)) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_attachments', JSON.stringify(data.attachments)); } catch {}
+            return data.attachments;
+          });
+        }
+
+        // 5. Update Messages
+        if (Array.isArray(data.messages)) {
+          setMessages(prev => {
+            if (prev.length === data.messages.length && prev.every((m, idx) => m.id === data.messages[idx].id)) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_messages', JSON.stringify(data.messages)); } catch {}
+            return data.messages;
+          });
+        }
+
+        // 6. Update Members
+        if (Array.isArray(data.members)) {
+          setAllMembers(prev => {
+            if (prev.length === data.members.length && prev.every((m, idx) => m.id === data.members[idx].id && m.role === data.members[idx].role)) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_members', JSON.stringify(data.members)); } catch {}
+            return data.members;
+          });
+        }
+
+        // 7. Update Workspaces
+        if (Array.isArray(data.workspaces) && data.workspaces.length > 0) {
+          setWorkspaces(prev => {
+            if (prev.length === data.workspaces.length && prev.every((w, idx) => w.id === data.workspaces[idx].id && w.name === data.workspaces[idx].name)) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_workspaces', JSON.stringify(data.workspaces)); } catch {}
+            return data.workspaces;
+          });
+        }
+
+        // 8. Update Notifications
+        if (Array.isArray(data.notifications)) {
+          setNotifications(prev => {
+            if (prev.length === data.notifications.length && prev.every((n, idx) => n.id === data.notifications[idx].id && n.read === data.notifications[idx].read)) {
+              return prev;
+            }
+            try { localStorage.setItem('flowboard_notifications', JSON.stringify(data.notifications)); } catch {}
+            return data.notifications;
+          });
+        }
+      } catch {
+        // Silently ignore network hiccup
+      } finally {
+        isFetching = false;
+      }
+    }
+
+    // Initial server fetch
+    syncWithServer();
+
+    // Polling interval (runs every 10s only when tab is visible)
+    const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        syncWithServer();
+      }
+    }, 10000);
+
+    // Instant sync on window focus or visibility change
+    function handleFocus() {
+      syncWithServer();
+    }
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') {
+        syncWithServer();
+      }
+    }
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Cross-tab instantaneous channel updates (< 15ms)
+    let broadcastChannel: BroadcastChannel | null = null;
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        broadcastChannel = new BroadcastChannel('flowboard_sync_channel');
+        broadcastChannel.onmessage = (event) => {
+          if (!event.data || !event.data.key) return;
+          const { key, data: payload } = event.data;
+          switch (key) {
+            case 'flowboard_issues':
+              if (Array.isArray(payload)) {
+                setAllIssues(payload);
+                setActiveDrawerIssue(prev => {
+                  if (!prev) return null;
+                  const u = payload.find((i: Issue) => i.id === prev.id);
+                  return u || prev;
+                });
+              }
+              break;
+            case 'flowboard_projects':
+              if (Array.isArray(payload)) setAllProjects(payload);
+              break;
+            case 'flowboard_milestones':
+              if (Array.isArray(payload)) setMilestones(payload);
+              break;
+            case 'flowboard_attachments':
+              if (Array.isArray(payload)) setAttachments(payload);
+              break;
+            case 'flowboard_messages':
+              if (Array.isArray(payload)) setMessages(payload);
+              break;
+            case 'flowboard_members':
+              if (Array.isArray(payload)) setAllMembers(payload);
+              break;
+            case 'flowboard_notifications':
+              if (Array.isArray(payload)) setNotifications(payload);
+              break;
+          }
+        };
+      }
+    } catch {}
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (broadcastChannel) broadcastChannel.close();
+    };
+  }, []);
+
 
   // Refresh backend if Supabase is connected
   async function refreshBackend() {
@@ -369,27 +701,40 @@ export default function WorkspaceApp() {
 
   // Projects scoped to workspace and persona
   const workspaceProjects = useMemo(() => {
-    let list = allProjects.filter(p => !p.workspaceId || p.workspaceId === currentWorkspace.id);
-    if (currentPersona.role === 'client') {
-      const clientEmail = (currentPersona.email || '').toLowerCase();
-      // Client strictly only accesses their assigned projects
-      list = list.filter(p => 
-        (p.clientEmail && p.clientEmail.toLowerCase() === clientEmail) ||
-        (p.clientContactEmail && p.clientContactEmail.toLowerCase() === clientEmail) ||
-        (currentPersona.assignedProjectIds && currentPersona.assignedProjectIds.includes(p.id)) ||
-        allMembers.some(m => m.projectId === p.id && (
-          (m.email && m.email.toLowerCase() === clientEmail) ||
-          (m.userId && m.userId === currentPersona.id)
-        ))
-      );
-    }
+    let list = allProjects.filter(p => {
+      // If user is a client, include if it matches client's assigned project(s) or email regardless of workspaceId
+      if (currentPersona.role === 'client') {
+        const clientEmail = (currentPersona.email || '').toLowerCase();
+        const selLower = (selectedProjectId || '').toLowerCase();
+        return (
+          Boolean(selectedProjectId && (p.id.toLowerCase() === selLower || p.key.toLowerCase() === selLower)) ||
+          (p.clientEmail && p.clientEmail.toLowerCase() === clientEmail) ||
+          (p.clientContactEmail && p.clientContactEmail.toLowerCase() === clientEmail) ||
+          (currentPersona.assignedProjectIds && (
+            currentPersona.assignedProjectIds.includes(p.id) ||
+            currentPersona.assignedProjectIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id.toLowerCase() === p.key.toLowerCase())
+          )) ||
+          allMembers.some(m => m.projectId === p.id && (
+            (m.email && m.email.toLowerCase() === clientEmail) ||
+            (m.userId && m.userId === currentPersona.id)
+          ))
+        );
+      }
+      return !p.workspaceId || p.workspaceId === currentWorkspace.id;
+    });
     return list;
-  }, [allProjects, currentWorkspace.id, currentPersona, allMembers]);
+  }, [allProjects, currentWorkspace.id, currentPersona, allMembers, selectedProjectId]);
 
   // Current Selected Project
   const currentProject = useMemo(() => {
-    return workspaceProjects.find(p => p.id === selectedProjectId) || null;
-  }, [workspaceProjects, selectedProjectId]);
+    if (!selectedProjectId) return null;
+    const lower = selectedProjectId.toLowerCase();
+    return (
+      workspaceProjects.find(p => p.id.toLowerCase() === lower || p.key.toLowerCase() === lower) ||
+      allProjects.find(p => p.id.toLowerCase() === lower || p.key.toLowerCase() === lower) ||
+      null
+    );
+  }, [workspaceProjects, allProjects, selectedProjectId]);
 
   // Project Members & Issues (with client visibility enforcement)
   const currentProjectMembers = useMemo(() => {
@@ -469,10 +814,25 @@ export default function WorkspaceApp() {
   function navigateToProject(projectId: string | null, nextTab: typeof tab = 'Board') {
     setSelectedProjectId(projectId);
     setTab(nextTab);
+    setPage('projects');
     setQuery('');
     setPriorityFilter('All priorities');
     setStatusFilter('All statuses');
     setSidebar(false);
+    if (projectId) {
+      persist('flowboard_current_project', projectId);
+      if (currentPersona.role === 'client') {
+        if (!currentPersona.assignedProjectIds?.includes(projectId)) {
+          const updatedAssigned = Array.from(new Set([...(currentPersona.assignedProjectIds || []), projectId]));
+          const updatedPersona = {
+            ...currentPersona,
+            assignedProjectIds: updatedAssigned,
+          };
+          setCurrentPersona(updatedPersona);
+          persist('flowboard_persona', updatedPersona);
+        }
+      }
+    }
   }
 
   function navigateToPage(targetPage: typeof page) {
@@ -781,7 +1141,7 @@ export default function WorkspaceApp() {
       if (notif.issueId) {
         navigateToProject(notif.projectId, 'Board');
         const issue = allIssues.find(i => i.id === notif.issueId);
-        if (issue) setActiveDrawerIssue(issue);
+        if (issue) handleOpenIssue(issue);
       } else if (notif.type === 'chat_message') {
         navigateToProject(notif.projectId, 'Chat');
       } else {
@@ -885,6 +1245,14 @@ export default function WorkspaceApp() {
       });
       setAllProjects(updated);
       persist('flowboard_projects', updated);
+      const updatedItem = updated.find(p => p.id === data.id);
+      if (updatedItem) {
+        fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: updatedItem }),
+        }).catch(() => {});
+      }
       addActivity('updated project details for', data.name);
       setNotice(`Project ${data.name} updated.`);
     } else {
@@ -979,8 +1347,14 @@ export default function WorkspaceApp() {
       setAllIssues(updatedIssues);
 
       persist('flowboard_projects', updatedProjects);
-      persist('flowboard_members', updatedMembers);
-      persist('flowboard_issues', updatedIssues);
+      persist('flowboard_members', updatedMembers, newProjectId);
+      persist('flowboard_issues', updatedIssues, newProjectId);
+
+      fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: newProject }),
+      }).catch(() => {});
 
       addActivity('created project', newProject.name);
       setNotice(`Project ${newProject.name} is ready! Client invite link is active.`);
@@ -993,6 +1367,9 @@ export default function WorkspaceApp() {
     const updated = allProjects.filter(item => item.id !== projectId);
     setAllProjects(updated);
     persist('flowboard_projects', updated);
+    fetch(`/api/projects?id=${encodeURIComponent(projectId)}`, {
+      method: 'DELETE',
+    }).catch(() => {});
     if (selectedProjectId === projectId) {
       setSelectedProjectId(null);
     }
@@ -1002,7 +1379,8 @@ export default function WorkspaceApp() {
 
   // Issue Actions
   function handleSaveDrawerIssue(updated: Issue) {
-    const isNew = !allIssues.some(i => i.id === updated.id);
+    const prevIssue = allIssues.find(i => i.id === updated.id);
+    const isNew = !prevIssue;
     let newIssues: Issue[];
     if (isNew) {
       newIssues = [updated, ...allIssues];
@@ -1015,6 +1393,40 @@ export default function WorkspaceApp() {
     persist('flowboard_issues', newIssues);
     setActiveDrawerIssue(updated);
     setNotice(isNew ? 'Issue created.' : 'Issue updated.');
+
+    // Sync newly attached files with workspace attachments
+    if (updated.attachments?.length) {
+      const existingIds = new Set(attachments.map(a => a.id));
+      const newAtts = updated.attachments.filter(a => !existingIds.has(a.id));
+      if (newAtts.length > 0) {
+        const nextAttachments = [...newAtts, ...attachments];
+        setAttachments(nextAttachments);
+        persist('flowboard_attachments', nextAttachments);
+      }
+    }
+
+    // Trigger notification if client commented
+    const newCommentsCount = (updated.comments?.length || 0) - (prevIssue?.comments?.length || 0);
+    if (newCommentsCount > 0 && currentPersona.role === 'client') {
+      const latestComment = updated.comments?.[updated.comments.length - 1];
+      const hasImage = (latestComment?.attachments?.length || 0) > 0;
+      const notif: AppNotification = {
+        id: 'notif-' + Date.now(),
+        recipientEmail: 'alex.pm@company.com',
+        title: `Client Comment on ${currentProject?.key || 'TASK'}-${updated.number}`,
+        message: `${currentPersona.displayName}: "${(latestComment?.content || '').slice(0, 70)}"${hasImage ? ' [Attached Image]' : ''}`,
+        type: 'client_feedback',
+        projectId: updated.projectId,
+        issueId: updated.id,
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+      setNotifications(prev => {
+        const next = [notif, ...prev];
+        persist('flowboard_notifications', next);
+        return next;
+      });
+    }
   }
 
   function handleDeleteDrawerIssue(issueId: string) {
@@ -1023,8 +1435,15 @@ export default function WorkspaceApp() {
     setAllIssues(updated);
     persist('flowboard_issues', updated);
     setActiveDrawerIssue(null);
-    if (issue) addActivity('deleted issue', `${currentProject?.key || 'TASK'}-${issue.number}`);
     setNotice('Issue deleted.');
+  }
+
+  function handleOpenIssue(issue: Issue) {
+    if (currentPersona.role === 'client' || isClient(userRole)) {
+      setTaskChatIssue(issue);
+    } else {
+      setActiveDrawerIssue(issue);
+    }
   }
 
   function handleMoveIssue(issue: Issue, newStatus: string) {
@@ -1105,6 +1524,16 @@ export default function WorkspaceApp() {
     }
   }
 
+  function handleCopyProjectId(project: Project) {
+    const idToCopy = project.id || project.key;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(idToCopy);
+      setCopiedProjectId(project.id);
+      setNotice(`Project ID "${idToCopy}" copied to clipboard! Clients can enter this ID on the sign-in page to access ${project.name}.`);
+      setTimeout(() => setCopiedProjectId(null), 2500);
+    }
+  }
+
   function handleOpenClientInviteModal(project: Project) {
     setSelectedProjectId(project.id);
     setInviteRole('client');
@@ -1112,14 +1541,34 @@ export default function WorkspaceApp() {
     setIsInviteModalOpen(true);
   }
 
-  function handleJoinProjectWithLink(input: string): boolean {
+  async function handleJoinProjectWithLink(input: string): Promise<boolean> {
     const raw = input.trim();
     if (!raw) {
       setJoinError('Please enter an invite link or project code.');
       return false;
     }
 
-    const matchedProject = resolveProjectFromInvite(raw, allProjects);
+    let matchedProject = resolveProjectFromInvite(raw, allProjects);
+    if (!matchedProject) {
+      try {
+        const res = await fetch(`/api/projects?id=${encodeURIComponent(raw)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.project) {
+            matchedProject = data.project;
+            setAllProjects(prev => {
+              const map = new Map<string, Project>();
+              prev.forEach(p => map.set(p.id.toLowerCase(), p));
+              map.set(data.project.id.toLowerCase(), data.project);
+              const updated = Array.from(map.values());
+              persist('flowboard_projects', updated);
+              return updated;
+            });
+          }
+        }
+      } catch {}
+    }
+
     if (!matchedProject) {
       setJoinError('Project not found. Please double check your invite link or code.');
       return false;
@@ -1297,7 +1746,39 @@ export default function WorkspaceApp() {
   async function handleSaveProfile(updated: UserProfile) {
     setUserProfile(updated);
     persist('flowboard_profile', updated);
-    addActivity('updated personal profile and preferences', updated.displayName);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('flowboard_role_set', 'true');
+    }
+
+    // Synchronize role and persona so user can change role anytime
+    const targetRole = updated.role || currentPersona.role;
+    const matchingPersona = initialPersonas.find(p => p.role === targetRole) || currentPersona;
+    const syncedPersona: PersonaUser = {
+      ...matchingPersona,
+      displayName: updated.displayName || matchingPersona.displayName,
+      email: updated.email || matchingPersona.email,
+      role: targetRole,
+      title: updated.title || matchingPersona.title,
+      avatarColor: updated.avatarColor || matchingPersona.avatarColor,
+    };
+    setCurrentPersona(syncedPersona);
+    persist('flowboard_persona', syncedPersona);
+
+    if (targetRole === 'client') {
+      setFilter('all');
+      const clientProj = allProjects.find(p => 
+        (p.clientEmail && p.clientEmail.toLowerCase() === updated.email.toLowerCase()) ||
+        syncedPersona.assignedProjectIds.includes(p.id) ||
+        p.id === 'sample-1' ||
+        p.id === 'sample-2'
+      );
+      if (clientProj) {
+        navigateToProject(clientProj.id, 'Overview');
+      }
+    }
+
+    setNotice(`Profile updated · Active role is now ${targetRole.replace('_', ' ').toUpperCase()}`);
+    addActivity('updated personal profile and role', updated.displayName);
   }
 
   // Quick Issue Creation from Kanban Column
@@ -1381,7 +1862,7 @@ export default function WorkspaceApp() {
         issues={visibleIssues}
         onSelectIssue={issue => {
           navigateToProject(issue.projectId, 'Board');
-          setActiveDrawerIssue(issue);
+          handleOpenIssue(issue);
         }}
         members={currentProjectMembers}
         onSelectMember={() => navigateToPage('people')}
@@ -1420,21 +1901,23 @@ export default function WorkspaceApp() {
         canManage={canManage(userRole)}
       />
 
-      {/* CONTEXTUAL ISSUE DRAWER */}
-      <IssueDrawer
-        issue={activeDrawerIssue}
-        onClose={() => setActiveDrawerIssue(null)}
-        onUpdate={handleSaveDrawerIssue}
-        onDelete={handleDeleteDrawerIssue}
-        members={currentProjectMembers}
-        projectKey={currentProject?.key || 'TASK'}
-        canEdit={canEdit(userRole)}
-        canManage={canManage(userRole)}
-        isClientUser={currentPersona.role === 'client'}
-        currentUserName={currentPersona.displayName}
-        currentUserEmail={currentPersona.email}
-        onOpenTaskChat={issue => setTaskChatIssue(issue)}
-      />
+      {/* CONTEXTUAL ISSUE DRAWER (INTERNAL TEAM ONLY - NEVER SHOWN ON CLIENT SIDE) */}
+      {!(currentPersona.role === 'client' || isClient(userRole)) && (
+        <IssueDrawer
+          issue={activeDrawerIssue}
+          onClose={() => setActiveDrawerIssue(null)}
+          onUpdate={handleSaveDrawerIssue}
+          onDelete={handleDeleteDrawerIssue}
+          members={currentProjectMembers}
+          projectKey={currentProject?.key || 'TASK'}
+          canEdit={canEdit(userRole)}
+          canManage={canManage(userRole)}
+          isClientUser={false}
+          currentUserName={currentPersona.displayName}
+          currentUserEmail={currentPersona.email}
+          onOpenTaskChat={issue => setTaskChatIssue(issue)}
+        />
+      )}
 
       {/* CLIENT FEEDBACK MODAL */}
       <ClientFeedbackModal
@@ -1466,10 +1949,14 @@ export default function WorkspaceApp() {
         currentPersona={currentPersona}
         onSendMessage={handleSendTaskChatMessage}
         onPreviewAttachment={att => setPreviewAttachment(att)}
-        onOpenTaskDetails={issue => {
-          setTaskChatIssue(null);
-          setActiveDrawerIssue(issue);
-        }}
+        onOpenTaskDetails={
+          currentPersona.role === 'client' || isClient(userRole)
+            ? undefined
+            : (issue => {
+                setTaskChatIssue(null);
+                setActiveDrawerIssue(issue);
+              })
+        }
       />
 
       {/* FIRST TIME ONBOARDING WIZARD */}
@@ -1486,6 +1973,7 @@ export default function WorkspaceApp() {
           isOpen={Boolean(wsModalMode)}
           onClose={() => setWsModalMode(null)}
           mode={wsModalMode}
+          canManage={canManage(userRole)}
           workspaces={workspaces}
           currentWorkspace={currentWorkspace}
           onSelectWorkspace={handleSelectWorkspace}
@@ -1580,13 +2068,15 @@ export default function WorkspaceApp() {
             <CheckCheck size={19} />
             My tasks
           </button>
-          <button 
-            className={!selectedProjectId && page === 'people' ? 'active' : ''} 
-            onClick={() => navigateToPage('people')}
-          >
-            <Users size={19} />
-            People & access
-          </button>
+          {canViewInternal(userRole) && (
+            <button 
+              className={!selectedProjectId && page === 'people' ? 'active' : ''} 
+              onClick={() => navigateToPage('people')}
+            >
+              <Users size={19} />
+              People & access
+            </button>
+          )}
         </nav>
 
         {/* Project Navigation Section */}
@@ -1676,17 +2166,6 @@ export default function WorkspaceApp() {
               <PanelLeftClose size={19} />
             </button>
 
-            <button 
-              className="topbar-ws-pill" 
-              onClick={() => setWsModalMode('switch')}
-              title={`Switch workspace (current: ${currentWorkspace.name})`}
-            >
-              <span className="truncate">{currentWorkspace.name}</span>
-              <ChevronDown size={12} className="shrink-0" />
-            </button>
-
-            <ChevronRight size={14} className="crumb-sep shrink-0" />
-
             <strong className="crumb-strong truncate">
               {currentProject 
                 ? currentProject.name 
@@ -1724,14 +2203,6 @@ export default function WorkspaceApp() {
           </div>
 
           <div className="top-actions">
-            {/* Interactive Persona Switcher */}
-            <PersonaSwitcher
-              currentPersona={currentPersona}
-              onSelectPersona={handleSelectPersona}
-            />
-
-            <span className="divider" />
-
             {/* In-App Notifications Center */}
             <NotificationsPopover
               notifications={userNotifications}
@@ -1739,34 +2210,26 @@ export default function WorkspaceApp() {
               onSelectNotification={handleNotificationClick}
             />
 
-            <button 
-              aria-label="Workspace Settings" 
-              className="top-settings-btn"
-              onClick={() => setWsModalMode('settings')}
-            >
-              <Settings size={18} />
-            </button>
+            {canManage(userRole) && (
+              <button 
+                aria-label="Workspace Settings" 
+                className="top-settings-btn"
+                onClick={() => setWsModalMode('settings')}
+              >
+                <Settings size={18} />
+              </button>
+            )}
 
             <button 
+              type="button"
               onClick={() => setIsSettingsOpen(true)} 
-              style={{ padding: 0 }}
+              className="top-avatar-btn"
+              aria-label="User profile settings"
             >
               <Avatar name={userProfile.displayName} small />
             </button>
           </div>
         </header>
-
-        {/* Client Portal Indicator Banner when viewing as Client */}
-        {currentPersona.role === 'client' && (
-          <ClientPortalBanner
-            currentPersona={currentPersona}
-            onSwitchToAdmin={() => handleSelectPersona(initialPersonas[0])}
-            onEnterInviteLink={() => {
-              setJoinError(null);
-              setIsJoinProjectModalOpen(true);
-            }}
-          />
-        )}
 
         {/* CONTENT AREA */}
         <div className="page-content">
@@ -1843,70 +2306,29 @@ export default function WorkspaceApp() {
               </div>
 
               <div className="toolbar">
-                <div className="project-filters">
-                  {(currentPersona.role === 'client' || isClient(userRole)
-                    ? [
-                        ['all', 'All projects'],
-                        ['shared', 'Shared with me'],
-                      ]
-                    : [
-                        ['all', 'All projects'],
-                        ['owned', 'Owned by me'],
-                        ['shared', 'Shared with me'],
-                      ]
-                  ).map(([v, l]) => (
-                    <button 
-                      key={v} 
-                      className={filter === v ? 'current' : ''} 
-                      onClick={() => setFilter(v as any)}
-                    >
-                      {l}
-                    </button>
-                  ))}
-                </div>
+                {currentPersona.role === 'client' && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => {
+                      setJoinError(null);
+                      setIsJoinProjectModalOpen(true);
+                    }}
+                    className="gap-1.5 h-9 text-xs font-medium border-primary/30 text-primary hover:bg-primary/5 shrink-0"
+                  >
+                    <Link2 className="size-3.5" /> Join with link
+                  </Button>
+                )}
 
-                <div className="toolbar-right">
-                  {currentPersona.role === 'client' && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => {
-                        setJoinError(null);
-                        setIsJoinProjectModalOpen(true);
-                      }}
-                      className="gap-1.5 h-9 text-xs font-medium border-primary/30 text-primary hover:bg-primary/5 shrink-0"
-                    >
-                      <Link2 className="size-3.5" /> Join with link
-                    </Button>
-                  )}
-
-                  <div className="search-field">
-                    <Search size={16} />
-                    <input 
-                      aria-label="Search projects" 
-                      placeholder="Search projects..." 
-                      value={query} 
-                      onChange={e => setQuery(e.target.value)}
-                    />
-                    <kbd>⌘ K</kbd>
-                  </div>
-
-                  <div className="view-toggle">
-                    <button 
-                      aria-label="Grid view" 
-                      className={view === 'grid' ? 'current' : ''} 
-                      onClick={() => setView('grid')}
-                    >
-                      <LayoutGrid size={16} />
-                    </button>
-                    <button 
-                      aria-label="List view" 
-                      className={view === 'list' ? 'current' : ''} 
-                      onClick={() => setView('list')}
-                    >
-                      <List size={18} />
-                    </button>
-                  </div>
+                <div className="search-field" style={{ marginLeft: currentPersona.role === 'client' ? 'auto' : 0 }}>
+                  <Search size={16} />
+                  <input 
+                    aria-label="Search projects" 
+                    placeholder="Search projects..." 
+                    value={query} 
+                    onChange={e => setQuery(e.target.value)}
+                  />
+                  <kbd>⌘ K</kbd>
                 </div>
               </div>
 
@@ -1932,60 +2354,87 @@ export default function WorkspaceApp() {
                   const team = allMembers.filter(m => m.projectId === p.id);
 
                   return (
-                    <article className="project-card" key={p.id}>
+                    <article 
+                      className="project-card cursor-pointer" 
+                      key={p.id}
+                      onClick={() => navigateToProject(p.id, 'Board')}
+                    >
                       <div className="card-top">
                         <ProjectIcon color={p.color} />
                         <span className={`status-pill ${tasks.length && completed === tasks.length ? 'complete' : ''}`}>
                           <i />
                           {tasks.length && completed === tasks.length ? 'Completed' : p.status || 'In progress'}
                         </span>
-                        <div className="card-more">
+                        <div className="card-more" onClick={e => e.stopPropagation()}>
                           <button 
                             aria-label={`Options for ${p.name}`} 
-                            onClick={() => setMenu(menu === p.id ? null : p.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenu(menu === p.id ? null : p.id);
+                            }}
                           >
                             <MoreHorizontal size={20} />
                           </button>
                           {menu === p.id && (
-                            <div className="dropdown">
+                            <div className="dropdown" onClick={e => e.stopPropagation()}>
                               <button onClick={() => { navigateToProject(p.id, 'Overview'); setMenu(null); }}>
                                 Project overview <Eye size={14} />
                               </button>
                               <button onClick={() => { navigateToProject(p.id, 'Board'); setMenu(null); }}>
                                 Kanban board <LayoutGrid size={14} />
                               </button>
-                              <button onClick={() => { navigateToProject(p.id, 'People'); setMenu(null); }}>
-                                People & access <Users size={14} />
+                              <button onClick={() => { 
+                                handleCopyProjectId(p); 
+                                setMenu(null); 
+                              }}>
+                                Copy project ID <Copy size={14} />
                               </button>
+                              {canViewInternal(userRole) && (
+                                <button onClick={() => { navigateToProject(p.id, 'People'); setMenu(null); }}>
+                                  People & access <Users size={14} />
+                                </button>
+                              )}
                               {canManage(userRole) && (
                                 <>
-                                  <button onClick={() => { 
-                                    handleCopyProjectClientLink(p); 
-                                    setMenu(null); 
-                                  }}>
-                                    Copy client link <Link2 size={14} />
-                                  </button>
                                   <button onClick={() => { 
                                     handleOpenClientInviteModal(p); 
                                     setMenu(null); 
                                   }}>
                                     Invite client via email <Mail size={14} />
                                   </button>
+                                  <button onClick={() => { 
+                                    setProjectToEdit(p); 
+                                    setIsProjectModalOpen(true); 
+                                    setMenu(null); 
+                                  }}>
+                                    Edit settings <Settings size={14} />
+                                  </button>
                                 </>
                               )}
-                              <button onClick={() => { 
-                                setProjectToEdit(p); 
-                                setIsProjectModalOpen(true); 
-                                setMenu(null); 
-                              }}>
-                                Edit settings <Settings size={14} />
+                              <div className="dropdown-divider" />
+                              <button 
+                                className="delete-btn"
+                                onClick={() => { 
+                                  if (confirm(`Are you sure you want to delete "${p.name}"? This action cannot be undone.`)) {
+                                    handleDeleteProject(p.id);
+                                  }
+                                  setMenu(null); 
+                                }}
+                              >
+                                Delete project <Trash2 size={14} />
                               </button>
                             </div>
                           )}
                         </div>
                       </div>
 
-                      <button className="card-title" onClick={() => navigateToProject(p.id, 'Board')}>
+                      <button 
+                        className="card-title" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigateToProject(p.id, 'Board');
+                        }}
+                      >
                         {p.name}
                         <ArrowUpRight size={17} />
                       </button>
@@ -2020,26 +2469,26 @@ export default function WorkspaceApp() {
                             {team.length} {team.length === 1 ? 'member' : 'members'}
                           </span>
                         </div>
-                        <div className="card-bottom-actions">
+                        <div className="card-bottom-actions" onClick={e => e.stopPropagation()}>
                           {canManage(userRole) && (
                             <button 
                               type="button"
                               className={`invite-client-btn ${copiedProjectId === p.id ? 'copied' : ''}`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleCopyProjectClientLink(p);
+                                handleCopyProjectId(p);
                               }}
-                              title={`Copy client invite link for ${p.name}`}
+                              title={`Copy Project ID for ${p.name}`}
                             >
                               {copiedProjectId === p.id ? (
                                 <>
                                   <Check size={12} className="copy-check-icon" />
-                                  <span>Link copied!</span>
+                                  <span>ID copied!</span>
                                 </>
                               ) : (
                                 <>
-                                  <Link2 size={12} />
-                                  <span>Invite client</span>
+                                  <Copy size={12} />
+                                  <span>Project ID</span>
                                 </>
                               )}
                             </button>
@@ -2047,7 +2496,10 @@ export default function WorkspaceApp() {
                           <button 
                             className="open-project" 
                             aria-label={`Open ${p.name}`} 
-                            onClick={() => navigateToProject(p.id, 'Board')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigateToProject(p.id, 'Board');
+                            }}
                           >
                             <ArrowUpRight size={17} />
                           </button>
@@ -2200,35 +2652,25 @@ export default function WorkspaceApp() {
                 </div>
 
                 <div className="heading-actions">
-                  {currentPersona.role === 'client' ? (
-                    <Button 
-                      className="bg-primary text-primary-foreground gap-2 font-semibold shadow-xs"
-                      onClick={() => {
-                        setFeedbackTask(null);
-                        setIsFeedbackModalOpen(true);
-                      }}
-                    >
-                      <MessageSquarePlus className="size-4" /> Submit Feedback
-                    </Button>
-                  ) : (
+                  {currentPersona.role !== 'client' && (
                     <>
                       {canManage(userRole) && (
                         <>
                           <Button 
                             variant="outline" 
-                            onClick={() => handleCopyProjectClientLink(currentProject)}
+                            onClick={() => handleCopyProjectId(currentProject)}
                             className="gap-1.5"
-                            title="Copy client invite link to send directly to your client"
+                            title="Copy project ID for client sign-in"
                           >
                             {copiedProjectId === currentProject.id ? (
                               <>
                                 <Check className="size-4 text-emerald-500" />
-                                <span>Link copied!</span>
+                                <span>ID copied!</span>
                               </>
                             ) : (
                               <>
-                                <Link2 className="size-4" />
-                                <span>Client invite link</span>
+                                <Copy className="size-4" />
+                                <span>Copy project ID</span>
                               </>
                             )}
                           </Button>
@@ -2261,7 +2703,7 @@ export default function WorkspaceApp() {
                   { id: 'Files', label: 'Files & Media', icon: Paperclip, badge: currentProjectAttachments.length || undefined },
                   { id: 'Chat', label: 'Project Chat', icon: MessageSquare, badge: currentProjectMessages.length || undefined },
                   { id: 'Activity', label: 'Activity', icon: Activity },
-                  { id: 'People', label: 'Team', icon: Users, badge: currentProjectMembers.length },
+                  ...(canViewInternal(userRole) ? [{ id: 'People', label: 'Team', icon: Users, badge: currentProjectMembers.length }] : []),
                   ...(canManage(userRole) ? [{ id: 'Settings', label: 'Settings', icon: Settings }] : []),
                 ].map(t => {
                   const Icon = t.icon;
@@ -2291,7 +2733,7 @@ export default function WorkspaceApp() {
                   members={allMembers}
                   issues={currentProjectIssues}
                   activities={activities}
-                  onOpenIssue={issue => setActiveDrawerIssue(issue)}
+                  onOpenIssue={issue => handleOpenIssue(issue)}
                   onCreateIssue={() => {
                     setQuickIssueInitialStatus('To do');
                     setIsQuickIssueModalOpen(true);
@@ -2316,23 +2758,31 @@ export default function WorkspaceApp() {
                       />
                     </div>
 
-                    <select 
-                      aria-label="Filter by priority" 
-                      value={priorityFilter} 
-                      onChange={e => setPriorityFilter(e.target.value)}
-                    >
-                      <option>All priorities</option>
-                      {priorities.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
+                    <div className="filter-select-wrapper">
+                      <select 
+                        aria-label="Filter by priority" 
+                        value={priorityFilter} 
+                        onChange={e => setPriorityFilter(e.target.value)}
+                        className="has-custom-chevron"
+                      >
+                        <option>All priorities</option>
+                        {priorities.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <ChevronDown size={13} className="filter-select-chevron" />
+                    </div>
 
-                    <select 
-                      aria-label="Filter by status" 
-                      value={statusFilter} 
-                      onChange={e => setStatusFilter(e.target.value)}
-                    >
-                      <option>All statuses</option>
-                      {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
+                    <div className="filter-select-wrapper">
+                      <select 
+                        aria-label="Filter by status" 
+                        value={statusFilter} 
+                        onChange={e => setStatusFilter(e.target.value)}
+                        className="has-custom-chevron"
+                      >
+                        <option>All statuses</option>
+                        {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <ChevronDown size={13} className="filter-select-chevron" />
+                    </div>
 
                     <span className="issue-total">{visibleIssues.length} {visibleIssues.length === 1 ? 'task' : 'tasks'}</span>
 
@@ -2422,11 +2872,11 @@ export default function WorkspaceApp() {
                                 className="issue-card"
                                 draggable={canEdit(userRole)}
                                 onDragStart={e => e.dataTransfer.setData('text/plain', issue.id)}
-                                onClick={() => setActiveDrawerIssue(issue)}
+                                onClick={() => handleOpenIssue(issue)}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();
-                                    setActiveDrawerIssue(issue);
+                                    handleOpenIssue(issue);
                                   }
                                 }}
                               >
@@ -2478,7 +2928,7 @@ export default function WorkspaceApp() {
                       items={visibleIssues} 
                       projects={workspaceProjects} 
                       members={allMembers} 
-                      onOpen={issue => setActiveDrawerIssue(issue)} 
+                      onOpen={issue => handleOpenIssue(issue)} 
                       onOpenTaskChat={issue => setTaskChatIssue(issue)}
                     />
                   )}
@@ -2494,7 +2944,7 @@ export default function WorkspaceApp() {
                   canManage={canManage(userRole)}
                   onAddMilestone={handleAddMilestone}
                   onUpdateMilestone={handleUpdateMilestone}
-                  onOpenIssue={issue => setActiveDrawerIssue(issue)}
+                  onOpenIssue={issue => handleOpenIssue(issue)}
                 />
               )}
 
@@ -2525,7 +2975,7 @@ export default function WorkspaceApp() {
                     const num = parseInt(key.split('-')[1]);
                     if (!isNaN(num)) {
                       const issue = allIssues.find(i => i.projectId === currentProject.id && i.number === num);
-                      if (issue) setActiveDrawerIssue(issue);
+                      if (issue) handleOpenIssue(issue);
                     }
                   }}
                 />
@@ -2569,7 +3019,7 @@ export default function WorkspaceApp() {
               )}
 
               {/* TAB 4: PEOPLE & ACCESS */}
-              {tab === 'People' && (
+              {tab === 'People' && canViewInternal(userRole) && (
                 <>
                   <div className="section-heading">
                     <div>
@@ -2743,7 +3193,7 @@ export default function WorkspaceApp() {
                 members={allMembers} 
                 onOpen={issue => {
                   navigateToProject(issue.projectId, 'Board');
-                  setActiveDrawerIssue(issue);
+                  handleOpenIssue(issue);
                 }}
                 onOpenTaskChat={issue => setTaskChatIssue(issue)}
               />
@@ -2759,7 +3209,7 @@ export default function WorkspaceApp() {
           )}
 
           {/* VIEW: WORKSPACE PEOPLE & ACCESS */}
-          {!currentProject && page === 'people' && (
+          {!currentProject && page === 'people' && canViewInternal(userRole) && (
             <>
               <div className="page-heading">
                 <div>
@@ -3240,62 +3690,7 @@ export default function WorkspaceApp() {
   );
 }
 
-function resolveProjectFromInvite(input: string, projectsList: Project[]): Project | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
 
-  // 1. Try URL parsing (full URL or relative query)
-  try {
-    let urlToParse = trimmed;
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      if (trimmed.startsWith('/') || trimmed.startsWith('?')) {
-        urlToParse = `https://dummy.domain${trimmed.startsWith('/') ? '' : '/'}${trimmed}`;
-      } else if (trimmed.includes('?')) {
-        urlToParse = `https://dummy.domain/${trimmed}`;
-      }
-    }
-    
-    if (urlToParse.startsWith('http://') || urlToParse.startsWith('https://')) {
-      const parsedUrl = new URL(urlToParse);
-      const inviteId = parsedUrl.searchParams.get('invite') || 
-                       parsedUrl.searchParams.get('projectId') || 
-                       parsedUrl.searchParams.get('project');
-      if (inviteId) {
-        const found = projectsList.find(p => p.id.toLowerCase() === inviteId.toLowerCase() || p.key.toLowerCase() === inviteId.toLowerCase());
-        if (found) return found;
-      }
-      const segments = parsedUrl.pathname.split('/').filter(Boolean);
-      const lastSegment = segments[segments.length - 1];
-      if (lastSegment) {
-        const found = projectsList.find(p => p.id.toLowerCase() === lastSegment.toLowerCase() || p.key.toLowerCase() === lastSegment.toLowerCase());
-        if (found) return found;
-      }
-    }
-  } catch {
-    // Continue to fallback checks
-  }
-
-  // 2. Direct query param fallback (e.g. invite=sample-1)
-  const queryMatch = trimmed.match(/(?:invite|projectId|project)=([a-zA-Z0-9_-]+)/i);
-  if (queryMatch && queryMatch[1]) {
-    const found = projectsList.find(p => p.id.toLowerCase() === queryMatch[1].toLowerCase() || p.key.toLowerCase() === queryMatch[1].toLowerCase());
-    if (found) return found;
-  }
-
-  // 3. Exact or case-insensitive match on ID
-  const byId = projectsList.find(p => p.id.toLowerCase() === trimmed.toLowerCase());
-  if (byId) return byId;
-
-  // 4. Exact or case-insensitive match on Key
-  const byKey = projectsList.find(p => p.key.toLowerCase() === trimmed.toLowerCase());
-  if (byKey) return byKey;
-
-  // 5. Case-insensitive match on Name
-  const byName = projectsList.find(p => p.name.toLowerCase() === trimmed.toLowerCase());
-  if (byName) return byName;
-
-  return null;
-}
 
 function isOverdue(dueDate?: string, status?: string): boolean {
   if (!dueDate || status === 'Done') return false;
@@ -3317,15 +3712,15 @@ function IssueTable({
   onOpenTaskChat?: (i: Issue) => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
+    <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-2xs">
       <Table className="min-w-[580px]">
         <TableHeader>
           <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border">
-            <TableHead className="w-[42%] text-xs font-semibold text-muted-foreground py-3">Task</TableHead>
-            <TableHead className="text-xs font-semibold text-muted-foreground py-3">Status</TableHead>
-            <TableHead className="text-xs font-semibold text-muted-foreground py-3">Priority</TableHead>
-            <TableHead className="text-xs font-semibold text-muted-foreground py-3">Due Date</TableHead>
-            <TableHead className="text-xs font-semibold text-muted-foreground py-3 text-right pr-4">Assignee</TableHead>
+            <TableHead className="w-[42%] text-xs font-semibold text-muted-foreground py-3.5">Task</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground py-3.5">Status</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground py-3.5">Priority</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground py-3.5">Due Date</TableHead>
+            <TableHead className="text-xs font-semibold text-muted-foreground py-3.5 text-right pr-4">Assignee</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

@@ -46,6 +46,7 @@ interface WorkspaceModalProps {
   invitations?: Invitation[];
   onCancelInvitation?: (invitationId: string) => void;
   onResendInvitation?: (invitationId: string) => void;
+  canManage?: boolean;
 }
 
 export function WorkspaceModal({
@@ -61,8 +62,10 @@ export function WorkspaceModal({
   invitations = [],
   onCancelInvitation,
   onResendInvitation,
+  canManage = true,
 }: WorkspaceModalProps) {
-  const [activeTab, setActiveTab] = useState<'switch' | 'create' | 'settings'>(initialMode);
+  const effectiveMode = !canManage ? 'switch' : initialMode;
+  const [activeTab, setActiveTab] = useState<'switch' | 'create' | 'settings'>(effectiveMode);
 
   // Form fields
   const [name, setName] = useState('');
@@ -74,13 +77,14 @@ export function WorkspaceModal({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
-    setActiveTab(initialMode);
-    if (initialMode === 'settings') {
+    const nextMode = !canManage ? 'switch' : initialMode;
+    setActiveTab(nextMode);
+    if (nextMode === 'settings') {
       setName(currentWorkspace.name);
       setSlug(currentWorkspace.slug);
       setDescription(currentWorkspace.description || '');
       setColor(currentWorkspace.color || 'purple');
-    } else if (initialMode === 'create') {
+    } else if (nextMode === 'create') {
       setName('');
       setSlug('');
       setDescription('');
@@ -88,7 +92,7 @@ export function WorkspaceModal({
     }
     setConfirmDelete(false);
     setError('');
-  }, [initialMode, currentWorkspace, isOpen]);
+  }, [initialMode, currentWorkspace, isOpen, canManage]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -191,14 +195,20 @@ export function WorkspaceModal({
           }}
           className="w-full mt-2"
         >
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="switch">All Workspaces</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
-            <TabsTrigger value="create">
-              <Plus data-icon="inline-start" className="size-3.5" />
-              New
-            </TabsTrigger>
-          </TabsList>
+          {canManage ? (
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="switch">All Workspaces</TabsTrigger>
+              <TabsTrigger value="settings">Settings</TabsTrigger>
+              <TabsTrigger value="create">
+                <Plus data-icon="inline-start" className="size-3.5" />
+                New
+              </TabsTrigger>
+            </TabsList>
+          ) : (
+            <TabsList className="grid w-full grid-cols-1">
+              <TabsTrigger value="switch">All Workspaces</TabsTrigger>
+            </TabsList>
+          )}
 
           {/* Tab 1: Switch Workspaces */}
           <TabsContent value="switch" className="flex flex-col gap-4 pt-3">
@@ -210,10 +220,10 @@ export function WorkspaceModal({
                     key={ws.id}
                     type="button"
                     className={cn(
-                      'flex w-full items-center justify-between gap-3 p-3 rounded-lg border text-left transition-colors',
+                      'flex w-full items-center justify-between gap-3 p-3.5 rounded-xl border text-left transition-all active:scale-[0.99]',
                       isSelected
-                        ? 'border-primary/50 bg-primary/5 shadow-xs'
-                        : 'border-border bg-card hover:bg-accent/50'
+                        ? 'border-primary bg-primary/5 shadow-xs ring-1 ring-primary/40'
+                        : 'border-border bg-card hover:bg-muted/50 hover:border-border/80'
                     )}
                     onClick={() => {
                       onSelectWorkspace(ws.id);
@@ -241,18 +251,20 @@ export function WorkspaceModal({
               })}
             </div>
 
-            <Button
-              variant="outline"
-              className="w-full justify-center gap-2 mt-2"
-              onClick={() => {
-                setActiveTab('create');
-                setName('');
-                setSlug('');
-              }}
-            >
-              <Plus data-icon="inline-start" />
-              Create a new workspace
-            </Button>
+            {canManage && (
+              <Button
+                variant="outline"
+                className="w-full justify-center gap-2 mt-2"
+                onClick={() => {
+                  setActiveTab('create');
+                  setName('');
+                  setSlug('');
+                }}
+              >
+                <Plus data-icon="inline-start" />
+                Create a new workspace
+              </Button>
+            )}
           </TabsContent>
 
           {/* Tab 2: Create Workspace */}
