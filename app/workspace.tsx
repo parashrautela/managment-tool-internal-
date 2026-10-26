@@ -51,7 +51,7 @@ import {
   Mail,
   Trash2
 } from 'lucide-react';
-import { canManage, canEdit, canChangeMember, isClient, canViewInternal, canCreateProject, statuses, priorities } from '../lib/permissions';
+import { canManage, canEdit, canChangeMember, isClient, canViewInternal, canCreateProject, statuses, priorities, severities } from '../lib/permissions';
 import type { 
   Workspace, 
   Project, 
@@ -61,6 +61,7 @@ import type {
   Invitation, 
   UserProfile, 
   PriorityLevel, 
+  IssueSeverity,
   ProjectStatus,
   WorkspaceRole,
   ProjectMilestone,
@@ -217,6 +218,7 @@ export default function WorkspaceApp() {
   const [qiDescription, setQiDescription] = useState('');
   const [qiStatus, setQiStatus] = useState('To do');
   const [qiPriority, setQiPriority] = useState<PriorityLevel>('Medium');
+  const [qiSeverity, setQiSeverity] = useState<IssueSeverity>('Moderate');
   const [qiAssignee, setQiAssignee] = useState('unassigned');
   const [qiLabel, setQiLabel] = useState<string>('Task');
   const [qiClientVisible, setQiClientVisible] = useState<boolean>(true);
@@ -289,14 +291,30 @@ export default function WorkspaceApp() {
       const savedNotifications = localStorage.getItem('flowboard_notifications');
       if (savedNotifications) setNotifications(JSON.parse(savedNotifications));
 
-      // Handle invite links (?invite=<projectId>&role=client&email=...)
+      // Handle direct project links (?project=<id>&role=client) and invite links (?invite=<id>)
       if (typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
-        const inviteProj = params.get('invite') || params.get('projectId');
+        const inviteProj = params.get('project') || params.get('invite') || params.get('projectId');
         const inviteRoleParam = params.get('role');
         const inviteEmailParam = params.get('email');
+
+        const deletedProjectsList: string[] = (() => {
+          try {
+            return JSON.parse(localStorage.getItem('flowboard_deleted_project_ids') || '[]');
+          } catch {
+            return [];
+          }
+        })();
+
+        if (inviteProj && deletedProjectsList.includes(inviteProj.toLowerCase())) {
+          setNotice('This project link is no longer valid. The project was deleted by the administrator.');
+          setSelectedProjectId(null);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          return;
+        }
+
         if (inviteProj) {
-          if (inviteRoleParam === 'client') {
+          if (inviteRoleParam === 'client' || !inviteRoleParam) {
             const rawName = inviteEmailParam
               ? inviteEmailParam.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
               : 'Client Stakeholder';
@@ -324,9 +342,9 @@ export default function WorkspaceApp() {
               email: resolvedPersona.email,
               title: resolvedPersona.title || 'Client Stakeholder',
             }));
-            setNotice(`Welcome! You have joined as a Client (${resolvedPersona.displayName}).`);
+            setNotice(`Welcome! You have accessed ${inviteProj} as Client (${resolvedPersona.displayName}).`);
           } else {
-            setNotice('Joined project via invite link.');
+            setNotice('Connected to project via direct link.');
           }
           if (inviteProj !== 'workspace') {
             const localFound = resolveProjectFromInvite(inviteProj, allProjects);
@@ -339,6 +357,18 @@ export default function WorkspaceApp() {
             fetch(`/api/projects?id=${encodeURIComponent(inviteProj)}`)
               .then(r => r.json())
               .then(d => {
+                if (d.isDeleted || d.error) {
+                  setNotice('This project link is no longer valid. The project was deleted by the administrator.');
+                  setSelectedProjectId(null);
+                  try {
+                    const deleted: string[] = JSON.parse(localStorage.getItem('flowboard_deleted_project_ids') || '[]');
+                    if (!deleted.includes(inviteProj.toLowerCase())) {
+                      deleted.push(inviteProj.toLowerCase());
+                      localStorage.setItem('flowboard_deleted_project_ids', JSON.stringify(deleted));
+                    }
+                  } catch {}
+                  return;
+                }
                 if (d.project) {
                   setSelectedProjectId(d.project.id);
                   setTab('Board');
@@ -362,6 +392,7 @@ export default function WorkspaceApp() {
                     try { localStorage.setItem('flowboard_persona', JSON.stringify(updatedP)); } catch {}
                     return updatedP;
                   });
+                  setNotice(`Connected to "${d.project.name}".`);
                 }
               })
               .catch(() => {});
@@ -1366,7 +1397,15 @@ export default function WorkspaceApp() {
     const p = allProjects.find(item => item.id === projectId);
     const updated = allProjects.filter(item => item.id !== projectId);
     setAllProjects(updated);
-    persist('flowboard_projects', updated);
+    persist('flowboard_projects', updated, projectId);
+
+    try {
+      const existing: string[] = JSON.parse(localStorage.getItem('flowboard_deleted_project_ids') || '[]');
+      const toAdd = [projectId.toLowerCase(), ...(p ? [p.key.toLowerCase()] : [])];
+      const merged = Array.from(new Set([...existing, ...toAdd]));
+      localStorage.setItem('flowboard_deleted_project_ids', JSON.stringify(merged));
+    } catch {}
+
     fetch(`/api/projects?id=${encodeURIComponent(projectId)}`, {
       method: 'DELETE',
     }).catch(() => {});
@@ -1374,7 +1413,7 @@ export default function WorkspaceApp() {
       setSelectedProjectId(null);
     }
     if (p) addActivity('deleted project', p.name);
-    setNotice('Project removed.');
+    setNotice('Project deleted. Direct project link has been invalidated.');
   }
 
   // Issue Actions
@@ -1447,13 +1486,27 @@ export default function WorkspaceApp() {
   }
 
   function handleMoveIssue(issue: Issue, newStatus: string) {
-    if (!canEdit(userRole)) return;
     const updated: Issue = { ...issue, status: newStatus as any };
     const list = allIssues.map(i => i.id === issue.id ? updated : i);
     setAllIssues(list);
     persist('flowboard_issues', list);
     addActivity(`moved ${currentProject?.key}-${issue.number} to`, newStatus);
-    setNotice(`Issue moved to ${newStatus}.`);
+    setNotice(`Issue status updated to ${newStatus}.`);
+    if (taskChatIssue && taskChatIssue.id === issue.id) {
+      setTaskChatIssue(updated);
+    }
+  }
+
+  function getStatusDotClass(status: string) {
+    switch (status) {
+      case 'Done': return 'bg-emerald-500';
+      case 'In progress': return 'bg-amber-500';
+      case 'In review': return 'bg-purple-500';
+      case 'Blocked': return 'bg-rose-500';
+      case 'To do': return 'bg-blue-500';
+      case 'Backlog': return 'bg-slate-400';
+      default: return 'bg-slate-400';
+    }
   }
 
   // Team & Member Actions (Flow 4)
@@ -1506,10 +1559,10 @@ export default function WorkspaceApp() {
     window.open(`mailto:${targetEmail}?subject=${subject}&body=${body}`, '_blank');
   }
 
-  function handleCopyProjectClientLink(project: Project) {
+  function handleCopyProjectLink(project: Project) {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://flowboard.io';
     const params = new URLSearchParams({
-      invite: project.id,
+      project: project.id,
       role: 'client',
     });
     if (project.clientContactEmail) {
@@ -1519,19 +1572,17 @@ export default function WorkspaceApp() {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(link);
       setCopiedProjectId(project.id);
-      setNotice(`Client invite link for "${project.name}" copied to clipboard! Send this link to your client to grant instant access.`);
+      setNotice(`Direct project link for "${project.name}" copied to clipboard! Clients will be taken directly to the project. Link is valid until deleted by an admin.`);
       setTimeout(() => setCopiedProjectId(null), 2500);
     }
   }
 
+  function handleCopyProjectClientLink(project: Project) {
+    handleCopyProjectLink(project);
+  }
+
   function handleCopyProjectId(project: Project) {
-    const idToCopy = project.id || project.key;
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(idToCopy);
-      setCopiedProjectId(project.id);
-      setNotice(`Project ID "${idToCopy}" copied to clipboard! Clients can enter this ID on the sign-in page to access ${project.name}.`);
-      setTimeout(() => setCopiedProjectId(null), 2500);
-    }
+    handleCopyProjectLink(project);
   }
 
   function handleOpenClientInviteModal(project: Project) {
@@ -1788,6 +1839,7 @@ export default function WorkspaceApp() {
     const title = qiTitle.trim();
     if (!title) return;
 
+    const isClientUser = currentPersona.role === 'client' || isClient(userRole);
     const nextNum = currentProjectIssues.length + 1;
     const newIssue: Issue = {
       id: `iss-${currentProject.id}-${Date.now()}`,
@@ -1795,13 +1847,15 @@ export default function WorkspaceApp() {
       number: nextNum,
       title,
       description: qiDescription.trim(),
-      status: (qiStatus as any) || quickIssueInitialStatus,
+      status: isClientUser ? (quickIssueInitialStatus || 'To do') : ((qiStatus as any) || quickIssueInitialStatus),
       priority: qiPriority,
-      label: (qiLabel as any) || 'Task',
-      assignee: qiAssignee && qiAssignee !== 'unassigned' ? qiAssignee : null,
+      severity: isClientUser ? 'Moderate' : qiSeverity,
+      label: isClientUser ? 'Feedback' : ((qiLabel as any) || 'Task'),
+      assignee: !isClientUser && qiAssignee && qiAssignee !== 'unassigned' ? qiAssignee : null,
+      creatorName: currentPersona.displayName,
       createdAt: new Date().toISOString().split('T')[0],
       comments: [],
-      isClientVisible: qiClientVisible,
+      isClientVisible: isClientUser ? true : qiClientVisible,
       attachments: [],
       subtasks: [],
     };
@@ -1810,9 +1864,10 @@ export default function WorkspaceApp() {
     setAllIssues(nextIssues);
     persist('flowboard_issues', nextIssues);
     addActivity('created issue', `${currentProject.key}-${nextNum}`);
-    setNotice(`Issue ${currentProject.key}-${nextNum} created!`);
+    setNotice(`${isClientUser ? 'Issue' : 'Task'} ${currentProject.key}-${nextNum} created!`);
     setQiTitle('');
     setQiDescription('');
+    setQiSeverity('Moderate');
     setQiAssignee('unassigned');
     setIsQuickIssueModalOpen(false);
   }
@@ -1957,6 +2012,8 @@ export default function WorkspaceApp() {
                 setActiveDrawerIssue(issue);
               })
         }
+        onUpdateStatus={handleMoveIssue}
+        onUpdateIssue={handleSaveDrawerIssue}
       />
 
       {/* FIRST TIME ONBOARDING WIZARD */}
@@ -2035,40 +2092,8 @@ export default function WorkspaceApp() {
           </button>
         </div>
 
-        {/* Workspace Switcher Button */}
-        <button 
-          className="workspace-switch" 
-          onClick={() => setWsModalMode('switch')}
-          title="Switch workspace"
-        >
-          <span className={`workspace-logo ${currentWorkspace.color || 'purple'}`}>
-            {currentWorkspace.logo || currentWorkspace.name.slice(0, 1).toUpperCase()}
-          </span>
-          <span>
-            <strong>{currentWorkspace.name}</strong>
-            <small>{currentWorkspace.slug}.flowboard.io</small>
-          </span>
-          <ChevronsUpDown size={15} />
-        </button>
-
-        <div className="nav-caption">WORKSPACE</div>
-        <nav>
-          <button 
-            className={!selectedProjectId && page === 'projects' ? 'active' : ''} 
-            onClick={() => navigateToPage('projects')}
-          >
-            <LayoutGrid size={18} />
-            Projects
-            <span className="nav-count">{workspaceProjects.length}</span>
-          </button>
-          <button 
-            className={!selectedProjectId && page === 'my-issues' ? 'active' : ''} 
-            onClick={() => navigateToPage('my-issues')}
-          >
-            <CheckCheck size={19} />
-            My tasks
-          </button>
-          {canViewInternal(userRole) && (
+        {canViewInternal(userRole) && (
+          <nav>
             <button 
               className={!selectedProjectId && page === 'people' ? 'active' : ''} 
               onClick={() => navigateToPage('people')}
@@ -2076,61 +2101,13 @@ export default function WorkspaceApp() {
               <Users size={19} />
               People & access
             </button>
-          )}
-        </nav>
-
-        {/* Project Navigation Section */}
-        <div className="nav-caption project-caption">
-          YOUR PROJECTS
-          {canCreateProject(userRole) && (
-            <button 
-              aria-label="Create project" 
-              onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
-            >
-              <Plus size={15} />
-            </button>
-          )}
-        </div>
-        <nav className="project-nav">
-          {workspaceProjects.map(p => (
-            <button 
-              key={p.id} 
-              className={selectedProjectId === p.id ? 'selected' : ''} 
-              onClick={() => navigateToProject(p.id, 'Board')}
-            >
-              <span className={`project-dot ${p.color}`} />
-              <span className="truncate">{p.name}</span>
-            </button>
-          ))}
-        </nav>
+          </nav>
+        )}
 
         {/* Sidebar Bottom Cards */}
         <div className="sidebar-bottom">
-          <div className="team-callout">
-            <span className="callout-icon"><Sparkles size={17} /></span>
-            <strong>Great work is a team sport.</strong>
-            <p>Bring your people and roadmaps<br />together in one place.</p>
-            {canCreateProject(userRole) ? (
-              <button onClick={() => {
-                if (currentProject && canManage(userRole)) setIsInviteModalOpen(true);
-                else { setProjectToEdit(null); setIsProjectModalOpen(true); }
-              }}>
-                Collaborate <ArrowUpRight size={14} />
-              </button>
-            ) : (
-              <span className="text-[11px] text-muted-foreground mt-2 block">
-                Client access is granted via invite link or email.
-              </span>
-            )}
-          </div>
 
           <InstallButton variant="sidebar" />
-
-          <button className="sidebar-help" onClick={() => setIsOnboardingOpen(true)}>
-            <CircleHelp size={17} />
-            Product tour & guide
-            <ArrowUpRight size={13} />
-          </button>
 
           {/* User Profile Footer */}
           <div className="profile">
@@ -2244,91 +2221,34 @@ export default function WorkspaceApp() {
           {/* VIEW: ALL PROJECTS OVERVIEW (When no project selected) */}
           {!currentProject && page === 'projects' && (
             <>
-              <div className="page-heading">
-                <div>
-                  <div className="eyebrow">A LITTLE CLARITY. A LOT OF POSSIBILITY.</div>
-                  <h1>Good work starts here<span className="heading-dot">.</span></h1>
-                  <p>A central home for {currentWorkspace.name}’s roadmaps, sprints, and deliverables.</p>
-                </div>
-                {canCreateProject(userRole) && (
-                  <Button 
-                    onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
-                    className="gap-2 shadow-xs"
-                  >
-                    <Plus data-icon="inline-start" /> Create project
-                  </Button>
-                )}
-              </div>
-
-              {/* High-level Workspace Metrics */}
-              <div className="stats-grid">
-                <div className="stat">
-                  <span className="stat-icon purple"><FolderKanban size={21} /></span>
-                  <div>
-                    <span>Total projects</span>
-                    <strong>{workspaceProjects.length}<small>Active roadmaps</small></strong>
-                  </div>
-                  <span className="stat-spark"><i/><i/><i/><i/><i/><i/></span>
-                </div>
-
-                <div className="stat">
-                  <span className="stat-icon blue"><Clock3 size={21} /></span>
-                  <div>
-                    <span>In progress issues</span>
-                    <strong>{inProgressIssuesCount}<small>Moving forward</small></strong>
-                  </div>
-                  <span className="stat-tag">Active velocity <ArrowUpRight size={12} /></span>
-                </div>
-
-                <div className="stat">
-                  <span className="stat-icon green"><CheckCircle2 size={21} /></span>
-                  <div>
-                    <span>Completed deliverables</span>
-                    <strong>{completedIssuesCount}<small>Shipped to done</small></strong>
-                  </div>
-                  <span className="mini-chart">
-                    <svg viewBox="0 0 80 36">
-                      <path d="M1 30L15 24L25 28L40 15L51 19L65 7L79 4" fill="none" stroke="#58a58a" strokeWidth="2"/>
-                    </svg>
-                  </span>
-                </div>
-              </div>
-
-              {/* Section Header & Toolbar */}
+              {/* Section Header */}
               <div className="section-heading">
                 <div>
                   <h2>Your projects <span>{workspaceProjects.length}</span></h2>
                   <p>Organize sprints, track cross-team work, and ship on time.</p>
                 </div>
-                <span className="private-note">
-                  <ShieldCheck size={14} /> Scoped to {currentWorkspace.name}
-                </span>
-              </div>
-
-              <div className="toolbar">
-                {currentPersona.role === 'client' && (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => {
-                      setJoinError(null);
-                      setIsJoinProjectModalOpen(true);
-                    }}
-                    className="gap-1.5 h-9 text-xs font-medium border-primary/30 text-primary hover:bg-primary/5 shrink-0"
-                  >
-                    <Link2 className="size-3.5" /> Join with link
-                  </Button>
-                )}
-
-                <div className="search-field" style={{ marginLeft: currentPersona.role === 'client' ? 'auto' : 0 }}>
-                  <Search size={16} />
-                  <input 
-                    aria-label="Search projects" 
-                    placeholder="Search projects..." 
-                    value={query} 
-                    onChange={e => setQuery(e.target.value)}
-                  />
-                  <kbd>⌘ K</kbd>
+                <div className="flex items-center gap-2">
+                  {currentPersona.role === 'client' && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        setJoinError(null);
+                        setIsJoinProjectModalOpen(true);
+                      }}
+                      className="gap-1.5 h-9 text-xs font-medium border-primary/30 text-primary hover:bg-primary/5 shrink-0"
+                    >
+                      <Link2 className="size-3.5" /> Join with link
+                    </Button>
+                  )}
+                  {canCreateProject(userRole) && (
+                    <Button 
+                      onClick={() => { setProjectToEdit(null); setIsProjectModalOpen(true); }}
+                      className="gap-2 shadow-xs"
+                    >
+                      <Plus data-icon="inline-start" /> Create project
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -2384,10 +2304,10 @@ export default function WorkspaceApp() {
                                 Kanban board <LayoutGrid size={14} />
                               </button>
                               <button onClick={() => { 
-                                handleCopyProjectId(p); 
+                                handleCopyProjectLink(p); 
                                 setMenu(null); 
                               }}>
-                                Copy project ID <Copy size={14} />
+                                Copy project link <Link2 size={14} />
                               </button>
                               {canViewInternal(userRole) && (
                                 <button onClick={() => { navigateToProject(p.id, 'People'); setMenu(null); }}>
@@ -2476,19 +2396,19 @@ export default function WorkspaceApp() {
                               className={`invite-client-btn ${copiedProjectId === p.id ? 'copied' : ''}`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleCopyProjectId(p);
+                                handleCopyProjectLink(p);
                               }}
-                              title={`Copy Project ID for ${p.name}`}
+                              title={`Copy direct project link for ${p.name}`}
                             >
                               {copiedProjectId === p.id ? (
                                 <>
                                   <Check size={12} className="copy-check-icon" />
-                                  <span>ID copied!</span>
+                                  <span>Link copied!</span>
                                 </>
                               ) : (
                                 <>
-                                  <Copy size={12} />
-                                  <span>Project ID</span>
+                                  <Link2 size={12} />
+                                  <span>Project link</span>
                                 </>
                               )}
                             </button>
@@ -2611,16 +2531,6 @@ export default function WorkspaceApp() {
                   )}
                 </div>
               )}
-
-              <div className="workspace-footer">
-                <span>
-                  <span className="live-dot" /> 
-                  Connected to {currentWorkspace.name} · Local state persisted
-                </span>
-                <span>
-                  Made for the way your team works <Sparkles size={13} />
-                </span>
-              </div>
             </>
           )}
 
@@ -2658,19 +2568,19 @@ export default function WorkspaceApp() {
                         <>
                           <Button 
                             variant="outline" 
-                            onClick={() => handleCopyProjectId(currentProject)}
+                            onClick={() => handleCopyProjectLink(currentProject)}
                             className="gap-1.5"
-                            title="Copy project ID for client sign-in"
+                            title="Copy direct project link for client access"
                           >
                             {copiedProjectId === currentProject.id ? (
                               <>
                                 <Check className="size-4 text-emerald-500" />
-                                <span>ID copied!</span>
+                                <span>Link copied!</span>
                               </>
                             ) : (
                               <>
-                                <Copy className="size-4" />
-                                <span>Copy project ID</span>
+                                <Link2 className="size-4" />
+                                <span>Project link</span>
                               </>
                             )}
                           </Button>
@@ -2682,29 +2592,24 @@ export default function WorkspaceApp() {
                       <Button 
                         onClick={() => {
                           setQuickIssueInitialStatus('To do');
+                          setQiLabel(isClient(userRole) ? 'Feedback' : 'Task');
+                          setQiSeverity('Moderate');
                           setIsQuickIssueModalOpen(true);
                         }}
-                        disabled={!canEdit(userRole)}
+                        className="gap-1.5 shadow-2xs"
                       >
-                        <Plus data-icon="inline-start" /> Create task
+                        <Plus data-icon="inline-start" /> 
+                        {isClient(userRole) ? 'Raise Issue' : 'Create task'}
                       </Button>
                     </>
                   )}
                 </div>
               </div>
 
-              {/* Complete Project Workspace Navigation (8 Sections) */}
+              {/* Project Workspace Navigation */}
               <div className="project-tabs">
                 {[
-                  { id: 'Overview', label: 'Overview', icon: BarChart3 },
                   { id: 'Board', label: 'Board', icon: FolderKanban },
-                  { id: 'List', label: 'Tasks', icon: List, badge: currentProjectIssues.length },
-                  { id: 'Timeline', label: 'Timeline', icon: CalendarDays, badge: currentProjectMilestones.length || undefined },
-                  { id: 'Files', label: 'Files & Media', icon: Paperclip, badge: currentProjectAttachments.length || undefined },
-                  { id: 'Chat', label: 'Project Chat', icon: MessageSquare, badge: currentProjectMessages.length || undefined },
-                  { id: 'Activity', label: 'Activity', icon: Activity },
-                  ...(canViewInternal(userRole) ? [{ id: 'People', label: 'Team', icon: Users, badge: currentProjectMembers.length }] : []),
-                  ...(canManage(userRole) ? [{ id: 'Settings', label: 'Settings', icon: Settings }] : []),
                 ].map(t => {
                   const Icon = t.icon;
                   return (
@@ -2715,7 +2620,6 @@ export default function WorkspaceApp() {
                     >
                       <Icon size={16} />
                       {t.label}
-                      {t.badge !== undefined && <span>{t.badge}</span>}
                     </button>
                   );
                 })}
@@ -2726,106 +2630,10 @@ export default function WorkspaceApp() {
                 </span>
               </div>
 
-              {/* TAB 1: OVERVIEW */}
-              {tab === 'Overview' && (
-                <ProjectOverview
-                  project={currentProject}
-                  members={allMembers}
-                  issues={currentProjectIssues}
-                  activities={activities}
-                  onOpenIssue={issue => handleOpenIssue(issue)}
-                  onCreateIssue={() => {
-                    setQuickIssueInitialStatus('To do');
-                    setIsQuickIssueModalOpen(true);
-                  }}
-                  onInvite={() => setIsInviteModalOpen(true)}
-                  onUpdateProject={patch => handleSaveProject({ ...currentProject, ...patch, action: 'update' })}
-                  canEdit={canEdit(userRole)}
-                />
-              )}
-
-              {/* TAB 2 & 3: BOARD & LIST */}
-              {(tab === 'Board' || tab === 'List') && (
+              {/* BOARD VIEW */}
+              {(tab === 'Board' || tab === 'Overview' || tab === 'List') && (
                 <>
-                  <div className="board-toolbar">
-                    <div className="search-field">
-                      <Search size={16} />
-                      <input 
-                        aria-label="Search tasks" 
-                        placeholder="Search tasks..." 
-                        value={query} 
-                        onChange={e => setQuery(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="filter-select-wrapper">
-                      <select 
-                        aria-label="Filter by priority" 
-                        value={priorityFilter} 
-                        onChange={e => setPriorityFilter(e.target.value)}
-                        className="has-custom-chevron"
-                      >
-                        <option>All priorities</option>
-                        {priorities.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                      <ChevronDown size={13} className="filter-select-chevron" />
-                    </div>
-
-                    <div className="filter-select-wrapper">
-                      <select 
-                        aria-label="Filter by status" 
-                        value={statusFilter} 
-                        onChange={e => setStatusFilter(e.target.value)}
-                        className="has-custom-chevron"
-                      >
-                        <option>All statuses</option>
-                        {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                      <ChevronDown size={13} className="filter-select-chevron" />
-                    </div>
-
-                    <span className="issue-total">{visibleIssues.length} {visibleIssues.length === 1 ? 'task' : 'tasks'}</span>
-
-                    <div className="avatar-group">
-                      {currentProjectMembers.slice(0, 4).map((m, i) => (
-                        <Avatar key={m.id} name={m.name} index={i} small />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Filter chips if active */}
-                  {isFiltering && (
-                    <div className="filter-chips-bar">
-                      {query && (
-                        <span className="filter-chip">
-                          Keyword: &quot;{query}&quot;
-                          <button onClick={() => setQuery('')}><X size={12} /></button>
-                        </span>
-                      )}
-                      {priorityFilter !== 'All priorities' && (
-                        <span className="filter-chip">
-                          Priority: {priorityFilter}
-                          <button onClick={() => setPriorityFilter('All priorities')}><X size={12} /></button>
-                        </span>
-                      )}
-                      {statusFilter !== 'All statuses' && (
-                        <span className="filter-chip">
-                          Status: {statusFilter}
-                          <button onClick={() => setStatusFilter('All statuses')}><X size={12} /></button>
-                        </span>
-                      )}
-                      <button 
-                        className="filter-clear-all" 
-                        onClick={() => {
-                          setQuery('');
-                          setPriorityFilter('All priorities');
-                          setStatusFilter('All statuses');
-                        }}
-                      >
-                        Clear all
-                      </button>
-                    </div>
-                  )}
+                  {/* KANBAN BOARD VIEW */}
 
                   {tab === 'Board' ? (
                     <div className="kanban">
@@ -2851,11 +2659,13 @@ export default function WorkspaceApp() {
                               <span className={`status-dot ${status.toLowerCase().replace(/\s+/g, '-')}`} />
                               <strong>{status}</strong>
                               <span>{colIssues.length}</span>
-                              {canEdit(userRole) && (
+                              {(canEdit(userRole) || isClient(userRole)) && (
                                 <button 
                                   aria-label={`Add task to ${status}`} 
                                   onClick={() => {
                                     setQuickIssueInitialStatus(status);
+                                    setQiLabel(isClient(userRole) ? 'Feedback' : 'Task');
+                                    setQiSeverity('Moderate');
                                     setIsQuickIssueModalOpen(true);
                                   }}
                                 >
@@ -2870,7 +2680,7 @@ export default function WorkspaceApp() {
                                 role="button"
                                 tabIndex={0}
                                 className="issue-card"
-                                draggable={canEdit(userRole)}
+                                draggable={canEdit(userRole) || isClient(userRole)}
                                 onDragStart={e => e.dataTransfer.setData('text/plain', issue.id)}
                                 onClick={() => handleOpenIssue(issue)}
                                 onKeyDown={e => {
@@ -2880,37 +2690,87 @@ export default function WorkspaceApp() {
                                   }
                                 }}
                               >
-                                <span className={`issue-label ${issue.label.toLowerCase()}`}>
-                                  {issue.label}
-                                </span>
-                                <strong>{issue.title}</strong>
-                                <span className="issue-card-bottom">
-                                  <span>{currentProject.key}-{issue.number}</span>
-                                  <span className={`priority ${issue.priority.toLowerCase()}`}>
-                                    <Flag size={12} /> {issue.priority}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className={`task-chat-btn ${(issue.comments?.length || 0) > 0 ? 'has-messages' : ''}`}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setTaskChatIssue(issue);
-                                    }}
-                                    onKeyDown={(e) => {
-                                      e.stopPropagation();
-                                    }}
-                                    title="Open Task Group Chat (Client & Team)"
+                                <div className="issue-card-top">
+                                  <div className="issue-card-top-left">
+                                    <span className={`issue-label ${issue.label.toLowerCase()}`}>
+                                      {issue.label}
+                                    </span>
+                                    {issue.severity && (
+                                      <span className={`severity-tag severity-${issue.severity.toLowerCase()}`}>
+                                        {issue.severity}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div 
+                                    className="shrink-0"
+                                    onClick={e => e.stopPropagation()} 
+                                    onKeyDown={e => e.stopPropagation()}
                                   >
-                                    <MessageSquare size={12} />
-                                    <span>{(issue.comments?.length || 0) > 0 ? issue.comments?.length : 'Chat'}</span>
-                                  </button>
-                                  {issue.assignee && (
-                                    <Avatar 
-                                      name={currentProjectMembers.find(m => m.id === issue.assignee)?.name || 'Unassigned'} 
-                                      small 
-                                    />
-                                  )}
-                                </span>
+                                    <Select
+                                      value={issue.status}
+                                      onValueChange={(val) => handleMoveIssue(issue, val)}
+                                    >
+                                      <SelectTrigger 
+                                        size="sm" 
+                                        className="h-5 text-[10.5px] font-semibold px-2 py-0 border border-border/80 rounded-full bg-background hover:bg-muted/70 gap-1.5 shadow-2xs focus:ring-0"
+                                        title="Change status"
+                                      >
+                                        <span className={`size-1.5 rounded-full shrink-0 ${getStatusDotClass(issue.status)}`} />
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent align="end">
+                                        {['Backlog', 'To do', 'In progress', 'In review', 'Blocked', 'Done'].map(s => (
+                                          <SelectItem key={s} value={s} className="text-xs">
+                                            <span className="flex items-center gap-1.5">
+                                              <span className={`size-2 rounded-full shrink-0 ${getStatusDotClass(s)}`} />
+                                              {s}
+                                            </span>
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+
+                                <strong>{issue.title}</strong>
+                                {issue.description && (
+                                  <p className="text-[12px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                    {issue.description}
+                                  </p>
+                                )}
+
+                                <div className="issue-card-bottom">
+                                  <div className="issue-card-bottom-left">
+                                    <span>{currentProject.key}-{issue.number}</span>
+                                    <span className={`priority ${issue.priority.toLowerCase()}`}>
+                                      <Flag size={11} /> {issue.priority}
+                                    </span>
+                                  </div>
+
+                                  <div className="issue-card-bottom-right">
+                                    <button
+                                      type="button"
+                                      className={`task-chat-btn ${(issue.comments?.length || 0) > 0 ? 'has-messages' : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setTaskChatIssue(issue);
+                                      }}
+                                      onKeyDown={(e) => {
+                                        e.stopPropagation();
+                                      }}
+                                      title="Open Task Group Chat (Client & Team)"
+                                    >
+                                      <MessageSquare size={11} />
+                                      <span>{(issue.comments?.length || 0) > 0 ? issue.comments?.length : 'Chat'}</span>
+                                    </button>
+                                    {issue.assignee && (
+                                      <Avatar 
+                                        name={currentProjectMembers.find(m => m.id === issue.assignee)?.name || 'Unassigned'} 
+                                        small 
+                                      />
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             ))}
 
@@ -3293,9 +3153,13 @@ export default function WorkspaceApp() {
                 <Layers className="size-5" />
               </span>
               <div>
-                <DialogTitle className="text-lg font-bold">Create a task</DialogTitle>
+                <DialogTitle className="text-lg font-bold">
+                  {isClient(userRole) ? 'Report an issue' : 'Create a task'}
+                </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Add a new deliverable to {currentProject?.name} ({currentProject?.key}).
+                  {isClient(userRole) 
+                    ? `Submit an issue or feedback item to ${currentProject?.name}.`
+                    : `Add a new deliverable to ${currentProject?.name} (${currentProject?.key}).`}
                 </DialogDescription>
               </div>
             </div>
@@ -3304,14 +3168,14 @@ export default function WorkspaceApp() {
           <form onSubmit={handleQuickIssueSubmit} className="flex flex-col gap-4 mt-2">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="qi-title" className="text-xs font-medium text-foreground">
-                Task title
+                {isClient(userRole) ? 'Issue summary' : 'Task title'}
               </label>
               <Input
                 id="qi-title"
                 autoFocus
                 required
                 maxLength={160}
-                placeholder="What needs to happen?"
+                placeholder={isClient(userRole) ? "Brief summary of the issue or feedback..." : "What needs to happen?"}
                 value={qiTitle}
                 onChange={(e) => setQiTitle(e.target.value)}
               />
@@ -3328,34 +3192,13 @@ export default function WorkspaceApp() {
                 id="qi-description"
                 rows={3}
                 maxLength={5000}
-                placeholder="Add context, acceptance criteria, or relevant links..."
+                placeholder={isClient(userRole) ? "Describe what happened, steps to reproduce, or requested changes..." : "Add context, acceptance criteria, or relevant links..."}
                 value={qiDescription}
                 onChange={(e) => setQiDescription(e.target.value)}
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="qi-status" className="text-xs font-medium text-foreground">
-                  Status
-                </label>
-                <Select
-                  value={qiStatus}
-                  onValueChange={(val) => setQiStatus(val)}
-                >
-                  <SelectTrigger id="qi-status" className="w-full">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {statuses.map((s) => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-
+            {isClient(userRole) ? (
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="qi-priority" className="text-xs font-medium text-foreground">
                   Priority
@@ -3376,65 +3219,136 @@ export default function WorkspaceApp() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="qi-severity" className="text-xs font-medium text-foreground">
+                      Severity
+                    </label>
+                    <Select
+                      value={qiSeverity}
+                      onValueChange={(val) => setQiSeverity(val as IssueSeverity)}
+                    >
+                      <SelectTrigger id="qi-severity" className="w-full">
+                        <SelectValue placeholder="Severity" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="Critical">🔴 Critical (Blocker)</SelectItem>
+                          <SelectItem value="Major">🟠 Major (High impact)</SelectItem>
+                          <SelectItem value="Moderate">🟡 Moderate (Normal)</SelectItem>
+                          <SelectItem value="Minor">🟢 Minor (Low)</SelectItem>
+                          <SelectItem value="Low">⚪ Low (Trivial)</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="qi-assignee" className="text-xs font-medium text-foreground">
-                  Assignee
-                </label>
-                <Select
-                  value={qiAssignee}
-                  onValueChange={(val) => setQiAssignee(val)}
-                >
-                  <SelectTrigger id="qi-assignee" className="w-full">
-                    <SelectValue placeholder="Assignee" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {currentProjectMembers.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="qi-priority" className="text-xs font-medium text-foreground">
+                      Priority
+                    </label>
+                    <Select
+                      value={qiPriority}
+                      onValueChange={(val) => setQiPriority(val as PriorityLevel)}
+                    >
+                      <SelectTrigger id="qi-priority" className="w-full">
+                        <SelectValue placeholder="Priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {priorities.map((p) => (
+                            <SelectItem key={p} value={p}>{p}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="qi-label" className="text-xs font-medium text-foreground">
-                  Label
-                </label>
-                <Select
-                  value={qiLabel}
-                  onValueChange={(val) => setQiLabel(val)}
-                >
-                  <SelectTrigger id="qi-label" className="w-full">
-                    <SelectValue placeholder="Label" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {['Feature', 'Design', 'Bug', 'Research', 'Task'].map((l) => (
-                        <SelectItem key={l} value={l}>{l}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="qi-status" className="text-xs font-medium text-foreground">
+                      Status
+                    </label>
+                    <Select
+                      value={qiStatus}
+                      onValueChange={(val) => setQiStatus(val)}
+                    >
+                      <SelectTrigger id="qi-status" className="w-full">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {statuses.map((s) => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-            <div className="flex items-center gap-2 pt-1 pb-1">
-              <input
-                type="checkbox"
-                id="qi-client-visible"
-                checked={qiClientVisible}
-                onChange={(e) => setQiClientVisible(e.target.checked)}
-                className="size-4 rounded border-border text-primary focus:ring-primary accent-primary cursor-pointer"
-              />
-              <label htmlFor="qi-client-visible" className="text-xs text-foreground cursor-pointer select-none">
-                Visible to client in their project portal
-              </label>
-            </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="qi-label" className="text-xs font-medium text-foreground">
+                      Label
+                    </label>
+                    <Select
+                      value={qiLabel}
+                      onValueChange={(val) => setQiLabel(val)}
+                    >
+                      <SelectTrigger id="qi-label" className="w-full">
+                        <SelectValue placeholder="Label" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {['Bug', 'Feedback', 'Feature', 'Design', 'Task'].map((l) => (
+                            <SelectItem key={l} value={l}>{l}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="qi-assignee" className="text-xs font-medium text-foreground">
+                      Assignee
+                    </label>
+                    <Select
+                      value={qiAssignee}
+                      onValueChange={(val) => setQiAssignee(val)}
+                    >
+                      <SelectTrigger id="qi-assignee" className="w-full">
+                        <SelectValue placeholder="Assignee" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="unassigned">Unassigned</SelectItem>
+                          {currentProjectMembers.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-6">
+                    <input
+                      type="checkbox"
+                      id="qi-client-visible"
+                      checked={qiClientVisible}
+                      onChange={(e) => setQiClientVisible(e.target.checked)}
+                      className="size-4 rounded border-border text-primary focus:ring-primary accent-primary cursor-pointer"
+                    />
+                    <label htmlFor="qi-client-visible" className="text-xs text-foreground cursor-pointer select-none">
+                      Visible to client
+                    </label>
+                  </div>
+                </div>
+              </>
+            )}
 
             <DialogFooter className="gap-2 sm:gap-0 mt-3">
               <Button
@@ -3445,7 +3359,7 @@ export default function WorkspaceApp() {
                 Cancel
               </Button>
               <Button type="submit">
-                Create task <ArrowRight data-icon="inline-end" />
+                {isClient(userRole) ? 'Submit Issue' : 'Create task'} <ArrowRight data-icon="inline-end" />
               </Button>
             </DialogFooter>
           </form>

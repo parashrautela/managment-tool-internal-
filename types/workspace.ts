@@ -16,6 +16,8 @@ export type ProjectStatus = 'Planned' | 'In progress' | 'On hold' | 'Completed' 
 export type PriorityLevel = 'Low' | 'Medium' | 'High' | 'Urgent';
 export type IssueLabel = 'Feature' | 'Design' | 'Bug' | 'Research' | 'Task' | 'Feedback';
 export type IssueStatus = 'Backlog' | 'To do' | 'In progress' | 'In review' | 'Blocked' | 'Done';
+export type IssueSeverity = 'Critical' | 'Major' | 'Moderate' | 'Minor' | 'Low';
+export const severities = ['Critical', 'Major', 'Moderate', 'Minor', 'Low'] as const;
 
 export type ProjectMilestone = {
   id: string;
@@ -112,6 +114,7 @@ export type Issue = {
   description: string;
   status: IssueStatus;
   priority: PriorityLevel;
+  severity?: IssueSeverity;
   label: IssueLabel;
   assignee: string | null;
   creatorName?: string;

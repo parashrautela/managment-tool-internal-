@@ -31,6 +31,7 @@ export interface WorkspaceStoreData {
   members: Member[];
   workspaces: Workspace[];
   notifications: AppNotification[];
+  deletedProjectIds?: string[];
   lastModified: number;
 }
 
@@ -65,6 +66,7 @@ function getInitialStore(): WorkspaceStoreData {
     members: [...initialMembers],
     workspaces: [...initialWorkspaces],
     notifications: [...initialNotifications],
+    deletedProjectIds: [],
     lastModified: Date.now(),
   };
 }
@@ -85,11 +87,23 @@ export function getStore(): WorkspaceStoreData {
       const content = fs.readFileSync(fileToRead, 'utf-8');
       const parsed = JSON.parse(content);
       if (parsed && Array.isArray(parsed.projects)) {
-        // Ensure JewellIndia and initial projects are always present
+        const deletedProjectIds: string[] = Array.isArray(parsed.deletedProjectIds)
+          ? parsed.deletedProjectIds.map((d: string) => String(d).toLowerCase())
+          : [];
+
+        // Ensure JewellIndia and initial projects are present unless deleted
         const pMap = new Map<string, Project>();
-        initialProjects.forEach(p => pMap.set(p.id.toLowerCase(), p));
-        pMap.set(defaultJewellIndia.id.toLowerCase(), defaultJewellIndia);
-        parsed.projects.forEach((p: Project) => pMap.set(p.id.toLowerCase(), p));
+        initialProjects
+          .filter(p => !deletedProjectIds.includes(p.id.toLowerCase()) && !deletedProjectIds.includes(p.key.toLowerCase()))
+          .forEach(p => pMap.set(p.id.toLowerCase(), p));
+
+        if (!deletedProjectIds.includes(defaultJewellIndia.id.toLowerCase()) && !deletedProjectIds.includes(defaultJewellIndia.key.toLowerCase())) {
+          pMap.set(defaultJewellIndia.id.toLowerCase(), defaultJewellIndia);
+        }
+
+        parsed.projects
+          .filter((p: Project) => !deletedProjectIds.includes(p.id.toLowerCase()) && !deletedProjectIds.includes(p.key.toLowerCase()))
+          .forEach((p: Project) => pMap.set(p.id.toLowerCase(), p));
 
         memoryStore = {
           projects: Array.from(pMap.values()),
@@ -100,6 +114,7 @@ export function getStore(): WorkspaceStoreData {
           members: Array.isArray(parsed.members) ? parsed.members : [...initialMembers],
           workspaces: Array.isArray(parsed.workspaces) ? parsed.workspaces : [...initialWorkspaces],
           notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [...initialNotifications],
+          deletedProjectIds,
           lastModified: parsed.lastModified || Date.now(),
         };
         return memoryStore;
@@ -126,7 +141,15 @@ export function saveStore(store: WorkspaceStoreData) {
   }
 }
 
+export function isProjectDeleted(idOrKey: string): boolean {
+  if (!idOrKey) return false;
+  const store = getStore();
+  const lower = idOrKey.trim().toLowerCase();
+  return Boolean(store.deletedProjectIds && store.deletedProjectIds.includes(lower));
+}
+
 export function findProject(query: string): Project | null {
+  if (isProjectDeleted(query)) return null;
   const store = getStore();
   return resolveProjectFromInvite(query, store.projects);
 }
@@ -156,6 +179,16 @@ export function upsertProject(project: Project): Project {
 export function deleteProjectFromStore(id: string) {
   const store = getStore();
   const pid = id.toLowerCase();
+  const targetProject = store.projects.find(p => p.id.toLowerCase() === pid || p.key.toLowerCase() === pid);
+  const targetKey = targetProject ? targetProject.key.toLowerCase() : null;
+
+  const currentDeleted = store.deletedProjectIds || [];
+  const updatedDeleted = Array.from(new Set([
+    ...currentDeleted,
+    pid,
+    ...(targetKey ? [targetKey] : [])
+  ]));
+
   const updatedProjects = store.projects.filter(p => p.id.toLowerCase() !== pid && p.key.toLowerCase() !== pid);
   const updatedIssues = store.issues.filter(i => i.projectId.toLowerCase() !== pid);
   const updatedMilestones = store.milestones.filter(m => m.projectId.toLowerCase() !== pid);
@@ -171,6 +204,7 @@ export function deleteProjectFromStore(id: string) {
     attachments: updatedAttachments,
     messages: updatedMessages,
     members: updatedMembers,
+    deletedProjectIds: updatedDeleted,
   });
 }
 

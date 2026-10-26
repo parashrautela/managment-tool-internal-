@@ -122,6 +122,12 @@ export default function Login() {
               return [data.project, ...prev];
             });
           }
+        } else {
+          const data = await res.json().catch(() => ({}));
+          if (data.isDeleted) {
+            setServerProject(null);
+            setError('This project has been deleted by an administrator and the link is no longer valid.');
+          }
         }
       } catch {}
     }, 150);
@@ -249,7 +255,7 @@ export default function Login() {
     }).catch(() => {});
 
     setTimeout(() => {
-      location.assign(`/?invite=${encodeURIComponent(matched!.id)}&role=client&email=${encodeURIComponent(trimmedEmail)}`);
+      location.assign(`/?project=${encodeURIComponent(matched!.id)}&role=client&email=${encodeURIComponent(trimmedEmail)}`);
     }, 250);
   }
 

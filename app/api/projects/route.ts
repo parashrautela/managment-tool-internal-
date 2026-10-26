@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStore, upsertProject, findProject, syncSlice, deleteProjectFromStore } from '../../../lib/workspace-store';
+import { getStore, upsertProject, findProject, syncSlice, deleteProjectFromStore, isProjectDeleted } from '../../../lib/workspace-store';
 import type { Project } from '../../../types/workspace';
 
 export const dynamic = 'force-dynamic';
@@ -15,14 +15,22 @@ export async function GET(req: Request) {
     }
 
     const trimmed = id.trim();
+
+    if (isProjectDeleted(trimmed)) {
+      return NextResponse.json({ 
+        error: 'This project has been deleted by an administrator and the link is no longer valid.',
+        isDeleted: true 
+      }, { status: 404 });
+    }
+
     const matched = findProject(trimmed);
     if (matched) {
       return NextResponse.json({ project: matched });
     }
 
     // Fallback: If it's a valid project ID format (e.g. starts with 'proj-'),
-    // register it so clients can seamlessly access their project
-    if (trimmed.toLowerCase().startsWith('proj-') || /^[A-Za-z0-9_-]{3,35}$/.test(trimmed)) {
+    // register it so clients can seamlessly access their project (only if not deleted)
+    if (!isProjectDeleted(trimmed) && (trimmed.toLowerCase().startsWith('proj-') || /^[A-Za-z0-9_-]{3,35}$/.test(trimmed))) {
       const cleanKey = trimmed.replace(/^proj-/, '').slice(0, 5).toUpperCase() || 'PROJ';
       const fallbackProject: Project = {
         id: trimmed,

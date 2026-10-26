@@ -20,17 +20,20 @@ import {
   Check, 
   Sparkles,
   MessageSquare,
-  ArrowUpRight
+  ArrowUpRight,
+  AlertCircle
 } from 'lucide-react';
-import type { 
-  Issue, 
-  Member, 
-  PriorityLevel, 
-  IssueLabel, 
-  IssueStatus, 
-  TaskAttachment, 
-  Subtask, 
-  IssueComment 
+import { 
+  type Issue, 
+  type Member, 
+  type PriorityLevel, 
+  type IssueLabel, 
+  type IssueStatus, 
+  type TaskAttachment, 
+  type Subtask, 
+  type IssueComment,
+  type IssueSeverity,
+  severities
 } from '../types/workspace';
 import { MediaViewerModal } from './media-viewer-modal';
 import {
@@ -367,6 +370,45 @@ export function IssueDrawer({
                   </Select>
                 </div>
 
+                {/* Severity */}
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-muted-foreground flex items-center gap-1.5 shrink-0 font-medium">
+                    <AlertCircle className="size-3.5 text-muted-foreground" /> Severity
+                  </span>
+                  <Select
+                    value={issue.severity || 'Moderate'}
+                    disabled={!canEdit}
+                    onValueChange={(val) => handleFieldChange('severity', val as IssueSeverity)}
+                  >
+                    <SelectTrigger size="sm" className="h-7 text-xs font-medium bg-background border-border/70 rounded-md w-auto min-w-[105px] justify-between">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className={`size-1.5 rounded-full shrink-0 ${
+                          issue.severity === 'Critical' ? 'bg-red-500' :
+                          issue.severity === 'Major' ? 'bg-orange-500' :
+                          issue.severity === 'Moderate' ? 'bg-amber-500' :
+                          issue.severity === 'Minor' ? 'bg-emerald-500' : 'bg-slate-400'
+                        }`} />
+                        <SelectValue />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {severities.map((sev) => (
+                        <SelectItem key={sev} value={sev}>
+                          <span className="flex items-center gap-2">
+                            <span className={`size-1.5 rounded-full ${
+                              sev === 'Critical' ? 'bg-red-500' :
+                              sev === 'Major' ? 'bg-orange-500' :
+                              sev === 'Moderate' ? 'bg-amber-500' :
+                              sev === 'Minor' ? 'bg-emerald-500' : 'bg-slate-400'
+                            }`} />
+                            {sev}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Assignee */}
                 <div className="flex items-center justify-between gap-1.5">
                   <span className="text-muted-foreground flex items-center gap-1.5 shrink-0 font-medium">
@@ -561,7 +603,11 @@ export function IssueDrawer({
                                 title={`Click to zoom ${att.name}`}
                               >
                                 <div className="h-20 w-32 bg-black/5 flex items-center justify-center overflow-hidden">
-                                  {att.type.startsWith('image/') ? (
+                                  {att.type.startsWith('audio/') || att.name.includes('voice-note') ? (
+                                    <div className="flex flex-col items-center justify-center gap-1 p-2 bg-primary/10 w-full h-full text-foreground" onClick={e => e.stopPropagation()}>
+                                      <audio src={att.url} controls className="w-full max-h-8" />
+                                    </div>
+                                  ) : att.type.startsWith('image/') ? (
                                     <img 
                                       src={att.url} 
                                       alt={att.name} 

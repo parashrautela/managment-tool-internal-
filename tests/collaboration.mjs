@@ -192,4 +192,5 @@ try {
   console.log('Collaboration test suite: All 15 assertions passed successfully!');
 } finally {
   await pg.close();
+  process.exit(0);
 }
