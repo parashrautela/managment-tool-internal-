@@ -23,12 +23,14 @@ export async function GET(req: Request) {
         attachments: store.attachments.filter(a => a.projectId.toLowerCase() === pid),
         messages: store.messages.filter(m => m.projectId.toLowerCase() === pid),
         members: store.members.filter(m => m.projectId.toLowerCase() === pid),
+        deletedProjectIds: store.deletedProjectIds || [],
         lastModified: store.lastModified,
       });
     }
 
     return NextResponse.json({
       projects: store.projects,
+      deletedProjectIds: store.deletedProjectIds || [],
       issues: store.issues,
       milestones: store.milestones,
       attachments: store.attachments,

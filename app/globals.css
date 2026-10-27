@@ -1840,20 +1840,37 @@ h1 {
   margin-left: auto;
 }
 
+.mobile-column-bar {
+  display: none;
+}
+
 .kanban {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(210px, 1fr));
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 14px;
   overflow-x: auto;
-  padding-bottom: 15px;
+  overflow-y: hidden;
+  padding-bottom: 16px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.kanban::-webkit-scrollbar {
+  display: none;
 }
 
 .kanban-column {
+  flex: 0 0 280px;
+  width: 280px;
+  min-width: 260px;
   background: var(--surface-soft, #f7f7f7);
   border: 1px solid var(--line-soft, #ebebeb);
   border-radius: 16px;
   padding: 14px 12px;
   min-height: 440px;
+  box-sizing: border-box;
 }
 
 .column-heading {
@@ -1952,7 +1969,7 @@ h1 {
 .issue-card-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 6px;
   width: 100%;
 }
@@ -3264,18 +3281,86 @@ h1 {
   .board-toolbar .avatar-group { 
     margin-left: 0; 
   }
+  .mobile-column-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin-bottom: 14px;
+    padding-bottom: 4px;
+  }
+  .mobile-column-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .mobile-column-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+  .mobile-column-tab:hover {
+    background: var(--muted);
+    color: var(--foreground);
+  }
+  .mobile-column-tab.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(123, 95, 226, 0.3);
+  }
+  .mobile-column-tab.active .mobile-column-count {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+  }
+  .mobile-column-count {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    background: rgba(0, 0, 0, 0.06);
+    color: inherit;
+    font-weight: 600;
+  }
   .kanban { 
-    display: grid;
-    grid-template-columns: repeat(5, 260px); 
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
     gap: 12px; 
     overflow-x: auto;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
-    padding-bottom: 16px;
+    scroll-padding: 0 16px;
+    padding-bottom: 18px;
+    padding-left: 2px;
+    padding-right: 16px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .kanban::-webkit-scrollbar {
+    display: none;
   }
   .kanban-column {
+    flex: 0 0 calc(100vw - 44px);
+    width: calc(100vw - 44px);
+    max-width: 360px;
+    min-width: 270px;
     scroll-snap-align: start;
+    scroll-snap-stop: normal;
     min-height: 360px;
+    box-sizing: border-box;
   }
   .people-row { 
     grid-template-columns: 1.6fr 1fr 20px; 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStore, upsertProject, findProject, syncSlice, deleteProjectFromStore, isProjectDeleted } from '../../../lib/workspace-store';
+import { getStore, upsertProject, findProject, syncSlice, deleteProjectFromStore, isProjectDeleted, undeleteProjectFromStore } from '../../../lib/workspace-store';
 import type { Project } from '../../../types/workspace';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +8,7 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id') || searchParams.get('key') || searchParams.get('query');
+    const rejoin = searchParams.get('rejoin') === 'true' || searchParams.get('join') === 'true';
     const store = getStore();
 
     if (!id) {
@@ -16,15 +17,25 @@ export async function GET(req: Request) {
 
     const trimmed = id.trim();
 
-    if (isProjectDeleted(trimmed)) {
+    if (isProjectDeleted(trimmed) && !rejoin) {
       return NextResponse.json({ 
         error: 'This project has been deleted by an administrator and the link is no longer valid.',
         isDeleted: true 
       }, { status: 404 });
     }
 
-    const matched = findProject(trimmed);
+    if (rejoin && isProjectDeleted(trimmed)) {
+      const restored = undeleteProjectFromStore(trimmed);
+      if (restored) {
+        return NextResponse.json({ project: restored, restored: true });
+      }
+    }
+
+    const matched = findProject(trimmed, rejoin);
     if (matched) {
+      if (rejoin) {
+        undeleteProjectFromStore(matched.id);
+      }
       return NextResponse.json({ project: matched });
     }
 

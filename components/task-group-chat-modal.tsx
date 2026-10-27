@@ -598,13 +598,6 @@ export function TaskGroupChatModal({
                 onValueChange={(val) => onUpdateStatus?.(issue, val)}
               >
                 <SelectTrigger size="sm" className="h-6 text-xs font-medium px-2 py-0 border rounded-md bg-muted/40 gap-1.5 focus:ring-0">
-                  <span className={`size-1.5 rounded-full shrink-0 ${
-                    issue.status === 'Done' ? 'bg-emerald-500' :
-                    issue.status === 'In progress' ? 'bg-amber-500' :
-                    issue.status === 'In review' ? 'bg-purple-500' :
-                    issue.status === 'Blocked' ? 'bg-rose-500' :
-                    issue.status === 'To do' ? 'bg-blue-500' : 'bg-slate-400'
-                  }`} />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="start">

@@ -382,12 +382,6 @@ export function IssueDrawer({
                   >
                     <SelectTrigger size="sm" className="h-7 text-xs font-medium bg-background border-border/70 rounded-md w-auto min-w-[105px] justify-between">
                       <div className="flex items-center gap-1.5 truncate">
-                        <span className={`size-1.5 rounded-full shrink-0 ${
-                          issue.severity === 'Critical' ? 'bg-red-500' :
-                          issue.severity === 'Major' ? 'bg-orange-500' :
-                          issue.severity === 'Moderate' ? 'bg-amber-500' :
-                          issue.severity === 'Minor' ? 'bg-emerald-500' : 'bg-slate-400'
-                        }`} />
                         <SelectValue />
                       </div>
                     </SelectTrigger>

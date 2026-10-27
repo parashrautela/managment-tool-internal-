@@ -166,12 +166,40 @@ function ProjectIcon({ color = 'purple', size = '' }: { color?: string; size?: s
   );
 }
 
+function getLocalDeletedProjectIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('flowboard_deleted_project_ids');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((s: string) => String(s).toLowerCase().trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalDeletedProjectIds(ids: string[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const cleaned = Array.from(new Set(ids.map(s => String(s).toLowerCase().trim()).filter(Boolean)));
+    localStorage.setItem('flowboard_deleted_project_ids', JSON.stringify(cleaned));
+  } catch {}
+}
+
+function isProjectDeletedLocally(project: { id: string; key?: string } | null | undefined, deletedList: string[]): boolean {
+  if (!project) return false;
+  const pid = (project.id || '').toLowerCase().trim();
+  const pkey = (project.key || '').toLowerCase().trim();
+  return Boolean((pid && deletedList.includes(pid)) || (pkey && deletedList.includes(pkey)));
+}
+
 export default function WorkspaceApp() {
   // Backend sync state
   const [apiData, setApiData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [mounted, setMounted] = useState(false);
 
   // Primary navigation & view state
   const [page, setPage] = useState<'projects' | 'my-issues' | 'people'>('projects');
@@ -228,6 +256,7 @@ export default function WorkspaceApp() {
   const [feedbackTask, setFeedbackTask] = useState<Issue | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<TaskAttachment | null>(null);
   const [taskChatIssue, setTaskChatIssue] = useState<Issue | null>(null);
+  const [activeMobileColumn, setActiveMobileColumn] = useState<string>('Backlog');
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -245,19 +274,25 @@ export default function WorkspaceApp() {
 
   // Hydrate local storage once on mount & handle invite links
   useEffect(() => {
+    setMounted(true);
     try {
       const savedWs = localStorage.getItem('flowboard_workspaces');
       if (savedWs) setWorkspaces(JSON.parse(savedWs));
       const savedCurWs = localStorage.getItem('flowboard_current_ws');
       if (savedCurWs) setCurrentWsId(savedCurWs);
+      const deletedIds = getLocalDeletedProjectIds();
       const savedProjects = localStorage.getItem('flowboard_projects');
-      if (savedProjects) {
+      if (savedProjects !== null) {
         try {
           const parsed = JSON.parse(savedProjects);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setAllProjects(parsed);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter(p => !isProjectDeletedLocally(p, deletedIds));
+            setAllProjects(filtered);
           }
         } catch {}
+      } else {
+        const filtered = initialProjects.filter(p => !isProjectDeletedLocally(p, deletedIds));
+        setAllProjects(filtered);
       }
       const savedMembers = localStorage.getItem('flowboard_members');
       if (savedMembers) setAllMembers(JSON.parse(savedMembers));
@@ -297,21 +332,6 @@ export default function WorkspaceApp() {
         const inviteProj = params.get('project') || params.get('invite') || params.get('projectId');
         const inviteRoleParam = params.get('role');
         const inviteEmailParam = params.get('email');
-
-        const deletedProjectsList: string[] = (() => {
-          try {
-            return JSON.parse(localStorage.getItem('flowboard_deleted_project_ids') || '[]');
-          } catch {
-            return [];
-          }
-        })();
-
-        if (inviteProj && deletedProjectsList.includes(inviteProj.toLowerCase())) {
-          setNotice('This project link is no longer valid. The project was deleted by the administrator.');
-          setSelectedProjectId(null);
-          window.history.replaceState({}, document.title, window.location.pathname);
-          return;
-        }
 
         if (inviteProj) {
           if (inviteRoleParam === 'client' || !inviteRoleParam) {
@@ -353,23 +373,23 @@ export default function WorkspaceApp() {
             setPage('projects');
             setTab('Board');
 
-            // Fetch project from server registry so client can see it even across incognito or new devices
-            fetch(`/api/projects?id=${encodeURIComponent(inviteProj)}`)
+            // User accessed via link! Fetch with rejoin=true so project is restored/un-deleted
+            fetch(`/api/projects?id=${encodeURIComponent(inviteProj)}&rejoin=true`)
               .then(r => r.json())
               .then(d => {
-                if (d.isDeleted || d.error) {
+                if (d.error && !d.project) {
                   setNotice('This project link is no longer valid. The project was deleted by the administrator.');
                   setSelectedProjectId(null);
-                  try {
-                    const deleted: string[] = JSON.parse(localStorage.getItem('flowboard_deleted_project_ids') || '[]');
-                    if (!deleted.includes(inviteProj.toLowerCase())) {
-                      deleted.push(inviteProj.toLowerCase());
-                      localStorage.setItem('flowboard_deleted_project_ids', JSON.stringify(deleted));
-                    }
-                  } catch {}
                   return;
                 }
                 if (d.project) {
+                  // User joined with link: remove from deleted list!
+                  const pid = d.project.id.toLowerCase();
+                  const pkey = (d.project.key || '').toLowerCase();
+                  const curDeleted = getLocalDeletedProjectIds();
+                  const updatedDeleted = curDeleted.filter(id => id !== pid && (!pkey || id !== pkey));
+                  saveLocalDeletedProjectIds(updatedDeleted);
+
                   setSelectedProjectId(d.project.id);
                   setTab('Board');
                   setPage('projects');
@@ -379,7 +399,7 @@ export default function WorkspaceApp() {
                   }
                   setAllProjects(prev => {
                     const map = new Map<string, Project>();
-                    prev.forEach(p => map.set(p.id.toLowerCase(), p));
+                    prev.filter(p => !isProjectDeletedLocally(p, updatedDeleted)).forEach(p => map.set(p.id.toLowerCase(), p));
                     map.set(d.project.id.toLowerCase(), d.project);
                     const updated = Array.from(map.values());
                     try { localStorage.setItem('flowboard_projects', JSON.stringify(updated)); } catch {}
@@ -471,12 +491,25 @@ export default function WorkspaceApp() {
           lastSyncTimeRef.current = data.lastModified;
         }
 
+        // Update local deleted list from server if present
+        if (Array.isArray(data.deletedProjectIds)) {
+          const curDeleted = getLocalDeletedProjectIds();
+          const combined = Array.from(new Set([...curDeleted, ...data.deletedProjectIds.map((d: string) => String(d).toLowerCase().trim())]));
+          saveLocalDeletedProjectIds(combined);
+        }
+
+        const activeDeleted = getLocalDeletedProjectIds();
+
         // 1. Update Projects
-        if (Array.isArray(data.projects) && data.projects.length > 0) {
+        if (Array.isArray(data.projects)) {
           setAllProjects(prev => {
             const map = new Map<string, Project>();
-            prev.forEach(p => map.set(p.id.toLowerCase(), p));
-            data.projects.forEach((p: Project) => map.set(p.id.toLowerCase(), p));
+            prev
+              .filter(p => !isProjectDeletedLocally(p, activeDeleted))
+              .forEach(p => map.set(p.id.toLowerCase(), p));
+            data.projects
+              .filter((p: Project) => !isProjectDeletedLocally(p, activeDeleted))
+              .forEach((p: Project) => map.set(p.id.toLowerCase(), p));
             const merged = Array.from(map.values());
             if (
               prev.length === merged.length &&
@@ -732,29 +765,32 @@ export default function WorkspaceApp() {
 
   // Projects scoped to workspace and persona
   const workspaceProjects = useMemo(() => {
-    let list = allProjects.filter(p => {
-      // If user is a client, include if it matches client's assigned project(s) or email regardless of workspaceId
-      if (currentPersona.role === 'client') {
-        const clientEmail = (currentPersona.email || '').toLowerCase();
-        const selLower = (selectedProjectId || '').toLowerCase();
-        return (
-          Boolean(selectedProjectId && (p.id.toLowerCase() === selLower || p.key.toLowerCase() === selLower)) ||
-          (p.clientEmail && p.clientEmail.toLowerCase() === clientEmail) ||
-          (p.clientContactEmail && p.clientContactEmail.toLowerCase() === clientEmail) ||
-          (currentPersona.assignedProjectIds && (
-            currentPersona.assignedProjectIds.includes(p.id) ||
-            currentPersona.assignedProjectIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id.toLowerCase() === p.key.toLowerCase())
-          )) ||
-          allMembers.some(m => m.projectId === p.id && (
-            (m.email && m.email.toLowerCase() === clientEmail) ||
-            (m.userId && m.userId === currentPersona.id)
-          ))
-        );
-      }
-      return !p.workspaceId || p.workspaceId === currentWorkspace.id;
-    });
+    const deleted = mounted ? getLocalDeletedProjectIds() : [];
+    let list = allProjects
+      .filter(p => !isProjectDeletedLocally(p, deleted))
+      .filter(p => {
+        // If user is a client, include if it matches client's assigned project(s) or email regardless of workspaceId
+        if (currentPersona.role === 'client') {
+          const clientEmail = (currentPersona.email || '').toLowerCase();
+          const selLower = (selectedProjectId || '').toLowerCase();
+          return (
+            Boolean(selectedProjectId && (p.id.toLowerCase() === selLower || p.key.toLowerCase() === selLower)) ||
+            (p.clientEmail && p.clientEmail.toLowerCase() === clientEmail) ||
+            (p.clientContactEmail && p.clientContactEmail.toLowerCase() === clientEmail) ||
+            (currentPersona.assignedProjectIds && (
+              currentPersona.assignedProjectIds.includes(p.id) ||
+              currentPersona.assignedProjectIds.some(id => id.toLowerCase() === p.id.toLowerCase() || id.toLowerCase() === p.key.toLowerCase())
+            )) ||
+            allMembers.some(m => m.projectId === p.id && (
+              (m.email && m.email.toLowerCase() === clientEmail) ||
+              (m.userId && m.userId === currentPersona.id)
+            ))
+          );
+        }
+        return !p.workspaceId || p.workspaceId === currentWorkspace.id;
+      });
     return list;
-  }, [allProjects, currentWorkspace.id, currentPersona, allMembers, selectedProjectId]);
+  }, [allProjects, currentWorkspace.id, currentPersona, allMembers, selectedProjectId, mounted]);
 
   // Current Selected Project
   const currentProject = useMemo(() => {
@@ -1394,26 +1430,48 @@ export default function WorkspaceApp() {
   }
 
   async function handleDeleteProject(projectId: string) {
-    const p = allProjects.find(item => item.id === projectId);
-    const updated = allProjects.filter(item => item.id !== projectId);
-    setAllProjects(updated);
-    persist('flowboard_projects', updated, projectId);
+    const p = allProjects.find(item => item.id.toLowerCase() === projectId.toLowerCase() || item.key.toLowerCase() === projectId.toLowerCase());
+    const pid = projectId.toLowerCase();
+    const pkey = p ? p.key.toLowerCase() : null;
 
+    // 1. Immediately record in local deleted list
+    const curDeleted = getLocalDeletedProjectIds();
+    const updatedDeleted = Array.from(new Set([
+      ...curDeleted,
+      pid,
+      ...(pkey ? [pkey] : [])
+    ]));
+    saveLocalDeletedProjectIds(updatedDeleted);
+
+    // 2. Remove from state and localStorage
+    const updated = allProjects.filter(item => item.id.toLowerCase() !== pid && (!pkey || item.key.toLowerCase() !== pkey));
+    setAllProjects(updated);
     try {
-      const existing: string[] = JSON.parse(localStorage.getItem('flowboard_deleted_project_ids') || '[]');
-      const toAdd = [projectId.toLowerCase(), ...(p ? [p.key.toLowerCase()] : [])];
-      const merged = Array.from(new Set([...existing, ...toAdd]));
-      localStorage.setItem('flowboard_deleted_project_ids', JSON.stringify(merged));
+      localStorage.setItem('flowboard_projects', JSON.stringify(updated));
     } catch {}
 
+    // 3. Persist to server and remove from server store
+    persist('flowboard_projects', updated, projectId);
     fetch(`/api/projects?id=${encodeURIComponent(projectId)}`, {
       method: 'DELETE',
     }).catch(() => {});
-    if (selectedProjectId === projectId) {
+
+    fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: 'flowboard_projects',
+        data: updated,
+        deleteId: projectId,
+        deleteProjectId: projectId,
+      }),
+    }).catch(() => {});
+
+    if (selectedProjectId && (selectedProjectId.toLowerCase() === pid || (pkey && selectedProjectId.toLowerCase() === pkey))) {
       setSelectedProjectId(null);
     }
     if (p) addActivity('deleted project', p.name);
-    setNotice('Project deleted. Direct project link has been invalidated.');
+    setNotice(`Project ${p ? p.name : projectId} deleted.`);
   }
 
   // Issue Actions
@@ -1602,19 +1660,11 @@ export default function WorkspaceApp() {
     let matchedProject = resolveProjectFromInvite(raw, allProjects);
     if (!matchedProject) {
       try {
-        const res = await fetch(`/api/projects?id=${encodeURIComponent(raw)}`);
+        const res = await fetch(`/api/projects?id=${encodeURIComponent(raw)}&rejoin=true`);
         if (res.ok) {
           const data = await res.json();
           if (data.project) {
             matchedProject = data.project;
-            setAllProjects(prev => {
-              const map = new Map<string, Project>();
-              prev.forEach(p => map.set(p.id.toLowerCase(), p));
-              map.set(data.project.id.toLowerCase(), data.project);
-              const updated = Array.from(map.values());
-              persist('flowboard_projects', updated);
-              return updated;
-            });
           }
         }
       } catch {}
@@ -1624,6 +1674,22 @@ export default function WorkspaceApp() {
       setJoinError('Project not found. Please double check your invite link or code.');
       return false;
     }
+
+    // Joining via link! Remove this project from deleted list
+    const pid = matchedProject.id.toLowerCase();
+    const pkey = (matchedProject.key || '').toLowerCase();
+    const curDeleted = getLocalDeletedProjectIds();
+    const updatedDeleted = curDeleted.filter(id => id !== pid && (!pkey || id !== pkey));
+    saveLocalDeletedProjectIds(updatedDeleted);
+
+    setAllProjects(prev => {
+      const map = new Map<string, Project>();
+      prev.filter(p => !isProjectDeletedLocally(p, updatedDeleted)).forEach(p => map.set(p.id.toLowerCase(), p));
+      map.set(matchedProject!.id.toLowerCase(), matchedProject!);
+      const updated = Array.from(map.values());
+      persist('flowboard_projects', updated);
+      return updated;
+    });
 
     // Ensure client persona is updated to have access to this project
     const updatedAssigned = Array.from(new Set([...(currentPersona.assignedProjectIds || []), matchedProject.id]));
@@ -1901,7 +1967,16 @@ export default function WorkspaceApp() {
   const isFiltering = query.trim() !== '' || priorityFilter !== 'All priorities' || statusFilter !== 'All statuses';
 
   const completedIssuesCount = currentProjectIssues.filter(i => i.status === 'Done').length;
-  const inProgressIssuesCount = currentProjectIssues.filter(i => i.status === 'In progress').length;
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-muted-foreground font-medium">Loading workspace...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -2224,7 +2299,7 @@ export default function WorkspaceApp() {
               {/* Section Header */}
               <div className="section-heading">
                 <div>
-                  <h2>Your projects <span>{workspaceProjects.length}</span></h2>
+                  <h2>Your projects <span suppressHydrationWarning>{workspaceProjects.length}</span></h2>
                   <p>Organize sprints, track cross-team work, and ship on time.</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -2636,16 +2711,61 @@ export default function WorkspaceApp() {
                   {/* KANBAN BOARD VIEW */}
 
                   {tab === 'Board' ? (
-                    <div className="kanban">
-                      {statuses.map(status => {
-                        const colIssues = visibleIssues.filter(i => i.status === status);
-                        return (
-                          <section 
-                            className="kanban-column" 
-                            key={status}
-                            onDragOver={e => {
-                              if (canEdit(userRole)) e.preventDefault();
-                            }}
+                    <>
+                      {/* Mobile Column Quick Switcher */}
+                      <div className="mobile-column-bar">
+                        {statuses.map(status => {
+                          const colCount = visibleIssues.filter(i => i.status === status).length;
+                          const isCurrent = activeMobileColumn === status;
+                          return (
+                            <button
+                              key={status}
+                              type="button"
+                              className={`mobile-column-tab ${isCurrent ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveMobileColumn(status);
+                                const el = document.getElementById(`kanban-col-${status.toLowerCase().replace(/\s+/g, '-')}`);
+                                if (el) {
+                                  el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+                                }
+                              }}
+                            >
+                              <span className={`status-dot ${status.toLowerCase().replace(/\s+/g, '-')}`} />
+                              <span>{status}</span>
+                              <span className="mobile-column-count">{colCount}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div 
+                        className="kanban"
+                        onScroll={(e) => {
+                          const target = e.currentTarget;
+                          const scrollLeft = target.scrollLeft;
+                          for (const s of statuses) {
+                            const el = document.getElementById(`kanban-col-${s.toLowerCase().replace(/\s+/g, '-')}`);
+                            if (el) {
+                              const left = el.offsetLeft;
+                              const width = el.offsetWidth;
+                              if (scrollLeft >= left - width * 0.4 && scrollLeft < left + width * 0.6) {
+                                setActiveMobileColumn(s);
+                                break;
+                              }
+                            }
+                          }
+                        }}
+                      >
+                        {statuses.map(status => {
+                          const colIssues = visibleIssues.filter(i => i.status === status);
+                          return (
+                            <section 
+                              className="kanban-column" 
+                              key={status}
+                              id={`kanban-col-${status.toLowerCase().replace(/\s+/g, '-')}`}
+                              onDragOver={e => {
+                                if (canEdit(userRole)) e.preventDefault();
+                              }}
                             onDrop={e => {
                               e.preventDefault();
                               const issueId = e.dataTransfer.getData('text/plain');
@@ -2690,19 +2810,9 @@ export default function WorkspaceApp() {
                                   }
                                 }}
                               >
-                                <div className="issue-card-top">
-                                  <div className="issue-card-top-left">
-                                    <span className={`issue-label ${issue.label.toLowerCase()}`}>
-                                      {issue.label}
-                                    </span>
-                                    {issue.severity && (
-                                      <span className={`severity-tag severity-${issue.severity.toLowerCase()}`}>
-                                        {issue.severity}
-                                      </span>
-                                    )}
-                                  </div>
+                                <div className="issue-card-top justify-end">
                                   <div 
-                                    className="shrink-0"
+                                    className="shrink-0 ml-auto"
                                     onClick={e => e.stopPropagation()} 
                                     onKeyDown={e => e.stopPropagation()}
                                   >
@@ -2715,7 +2825,6 @@ export default function WorkspaceApp() {
                                         className="h-5 text-[10.5px] font-semibold px-2 py-0 border border-border/80 rounded-full bg-background hover:bg-muted/70 gap-1.5 shadow-2xs focus:ring-0"
                                         title="Change status"
                                       >
-                                        <span className={`size-1.5 rounded-full shrink-0 ${getStatusDotClass(issue.status)}`} />
                                         <SelectValue />
                                       </SelectTrigger>
                                       <SelectContent align="end">
@@ -2782,7 +2891,8 @@ export default function WorkspaceApp() {
                           </section>
                         );
                       })}
-                    </div>
+                      </div>
+                    </>
                   ) : (
                     <IssueTable 
                       items={visibleIssues} 

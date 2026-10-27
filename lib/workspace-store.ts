@@ -148,10 +148,45 @@ export function isProjectDeleted(idOrKey: string): boolean {
   return Boolean(store.deletedProjectIds && store.deletedProjectIds.includes(lower));
 }
 
-export function findProject(query: string): Project | null {
-  if (isProjectDeleted(query)) return null;
+export function findProject(query: string, allowDeleted = false): Project | null {
+  if (!allowDeleted && isProjectDeleted(query)) return null;
   const store = getStore();
-  return resolveProjectFromInvite(query, store.projects);
+  const found = resolveProjectFromInvite(query, store.projects);
+  if (found) return found;
+  if (allowDeleted) {
+    const allKnown = [defaultJewellIndia, ...initialProjects];
+    return resolveProjectFromInvite(query, allKnown);
+  }
+  return null;
+}
+
+export function undeleteProjectFromStore(idOrKey: string): Project | null {
+  if (!idOrKey) return null;
+  const store = getStore();
+  const lower = idOrKey.trim().toLowerCase();
+
+  const allKnown = [...store.projects, defaultJewellIndia, ...initialProjects];
+  const matched = resolveProjectFromInvite(idOrKey, allKnown);
+
+  let finalDeleted = (store.deletedProjectIds || []).filter(d => d.toLowerCase() !== lower);
+  let updatedProjects = store.projects;
+
+  if (matched) {
+    const matchedKey = matched.key.toLowerCase();
+    finalDeleted = finalDeleted.filter(d => d.toLowerCase() !== matchedKey && d.toLowerCase() !== matched.id.toLowerCase());
+    const existing = store.projects.some(p => p.id.toLowerCase() === matched.id.toLowerCase());
+    if (!existing) {
+      updatedProjects = [matched, ...store.projects];
+    }
+  }
+
+  saveStore({
+    ...store,
+    projects: updatedProjects,
+    deletedProjectIds: finalDeleted,
+  });
+
+  return matched || null;
 }
 
 export function upsertProject(project: Project): Project {
@@ -168,9 +203,17 @@ export function upsertProject(project: Project): Project {
     updatedProjects = [project, ...store.projects];
   }
 
+  // If this project was previously in deletedProjectIds, un-mark it
+  const pid = project.id.toLowerCase();
+  const pkey = (project.key || '').toLowerCase();
+  const updatedDeleted = (store.deletedProjectIds || []).filter(
+    d => d.toLowerCase() !== pid && (!pkey || d.toLowerCase() !== pkey)
+  );
+
   saveStore({
     ...store,
     projects: updatedProjects,
+    deletedProjectIds: updatedDeleted,
   });
 
   return project;
@@ -218,10 +261,11 @@ export function syncSlice(key: string, data: unknown, meta?: { projectId?: strin
         break;
       }
       if (Array.isArray(data)) {
-        const pMap = new Map<string, Project>();
-        store.projects.forEach(p => pMap.set(p.id.toLowerCase(), p));
-        (data as Project[]).forEach(p => pMap.set(p.id.toLowerCase(), p));
-        saveStore({ ...store, projects: Array.from(pMap.values()) });
+        const deletedIds = (store.deletedProjectIds || []).map(d => d.toLowerCase());
+        const validProjects = (data as Project[]).filter(
+          p => p && p.id && !deletedIds.includes(p.id.toLowerCase()) && (!p.key || !deletedIds.includes(p.key.toLowerCase()))
+        );
+        saveStore({ ...store, projects: validProjects });
       }
       break;
     }
