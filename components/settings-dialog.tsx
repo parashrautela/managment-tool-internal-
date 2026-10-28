@@ -157,7 +157,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent className="sm:max-w-[620px] p-6 max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[620px] p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
         <DialogHeader className="gap-2">
           <div className="flex items-center gap-3">
             <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -178,22 +178,23 @@ export function SettingsDialog({
             onValueChange={(val) => setActiveTab(val as typeof activeTab)}
             className="w-full"
           >
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="profile">
-                <User data-icon="inline-start" className="size-3.5" />
-                Profile
+            <TabsList className="grid w-full grid-cols-4 p-1 h-auto min-w-0">
+              <TabsTrigger value="profile" className="gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1.5">
+                <User data-icon="inline-start" className="size-3.5 shrink-0" />
+                <span className="truncate">Profile</span>
               </TabsTrigger>
-              <TabsTrigger value="preferences">
-                <Settings data-icon="inline-start" className="size-3.5" />
-                Preferences
+              <TabsTrigger value="preferences" className="gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1.5">
+                <Settings data-icon="inline-start" className="size-3.5 shrink-0" />
+                <span className="hidden sm:inline truncate">Preferences</span>
+                <span className="sm:hidden truncate">Prefs</span>
               </TabsTrigger>
-              <TabsTrigger value="notifications">
-                <Bell data-icon="inline-start" className="size-3.5" />
-                Alerts
+              <TabsTrigger value="notifications" className="gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1.5">
+                <Bell data-icon="inline-start" className="size-3.5 shrink-0" />
+                <span className="truncate">Alerts</span>
               </TabsTrigger>
-              <TabsTrigger value="security">
-                <ShieldCheck data-icon="inline-start" className="size-3.5" />
-                Security
+              <TabsTrigger value="security" className="gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1.5">
+                <ShieldCheck data-icon="inline-start" className="size-3.5 shrink-0" />
+                <span className="truncate">Security</span>
               </TabsTrigger>
             </TabsList>
 

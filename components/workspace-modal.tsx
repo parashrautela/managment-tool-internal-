@@ -196,17 +196,20 @@ export function WorkspaceModal({
           className="w-full mt-2"
         >
           {canManage ? (
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="switch">All Workspaces</TabsTrigger>
-              <TabsTrigger value="settings">Settings</TabsTrigger>
-              <TabsTrigger value="create">
-                <Plus data-icon="inline-start" className="size-3.5" />
+            <TabsList className="grid w-full grid-cols-3 p-1 h-auto min-w-0">
+              <TabsTrigger value="switch" className="px-2 sm:px-3 text-xs">
+                <span className="hidden sm:inline">All Workspaces</span>
+                <span className="sm:hidden">Workspaces</span>
+              </TabsTrigger>
+              <TabsTrigger value="settings" className="px-2 sm:px-3 text-xs">Settings</TabsTrigger>
+              <TabsTrigger value="create" className="px-2 sm:px-3 text-xs gap-1 sm:gap-1.5">
+                <Plus data-icon="inline-start" className="size-3.5 shrink-0" />
                 New
               </TabsTrigger>
             </TabsList>
           ) : (
-            <TabsList className="grid w-full grid-cols-1">
-              <TabsTrigger value="switch">All Workspaces</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-1 p-1 h-auto min-w-0">
+              <TabsTrigger value="switch" className="px-2 sm:px-3 text-xs">All Workspaces</TabsTrigger>
             </TabsList>
           )}
 
